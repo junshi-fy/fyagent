@@ -33,7 +33,9 @@ const apps = [];
 if (process.platform === "darwin") {
   for (const dir of ["/Applications", join(home, "Applications")]) {
     if (!existsSync(dir)) continue;
-    for (const name of readdirSync(dir).filter((n) => /opencode|codex|claude|qoder|trae|workbuddy|grok|fyagent/i.test(n))) {
+    // ~/Applications is written only by per-user installs, so list all of it.
+    const userDir = dir !== "/Applications";
+    for (const name of readdirSync(dir).filter((n) => n.endsWith(".app") && (userDir || /opencode|codex|openai|chatgpt|claude|qoder|trae|workbuddy|grok|fyagent/i.test(n)))) {
       const plist = join(dir, name, "Contents", "Info.plist");
       apps.push({
         path: join(dir, name),
@@ -42,6 +44,11 @@ if (process.platform === "darwin") {
       });
     }
   }
+}
+if (process.platform === "win32") {
+  // Codex Desktop on Windows is an MSIX/Appx package, not a PATH binary.
+  const appx = run(`powershell -NoProfile -Command "Get-AppxPackage | Where-Object { $_.Name -match 'codex|openai' } | Select-Object Name,Version,Architecture,InstallLocation | ConvertTo-Json -Compress"`);
+  apps.push({ kind: "appx", query: "codex|openai", result: appx });
 }
 const report = { label, at: new Date().toISOString(), tools, apps };
 writeFileSync(join(out, `cli-versions-${label}.json`), JSON.stringify(report, null, 2));
