@@ -1,4 +1,4 @@
-# Plays the "user" in a third-party vendor installer wizard that FyAgent opened
+﻿# Plays the "user" in a third-party vendor installer wizard that FyAgent opened
 # (QoderWork / TRAE / WorkBuddy on Windows). Uses UI Automation only: accepts
 # the licence, keeps per-user scope, presses Next/Install/Finish until the
 # wizard window disappears or the timeout expires. Writes a JSON log.
