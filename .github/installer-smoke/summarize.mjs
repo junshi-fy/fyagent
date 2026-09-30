@@ -191,5 +191,7 @@ writeFileSync(join(out, "summary.md"), md.join("\n") + "\n");
 if (process.env.GITHUB_STEP_SUMMARY) writeFileSync(process.env.GITHUB_STEP_SUMMARY, md.join("\n") + "\n", { flag: "a" });
 console.log(md.join("\n"));
 
-const failed = !sha?.ok || !install?.ok || (scenario === "npm-preinstall" ? !launchOk(launches.baseline) : false);
+// Fork builds are verified against build-info.json in the locate step (it throws on mismatch).
+const shaOk = buildSource ? Boolean(buildSource.sha256) : sha?.ok;
+const failed = !shaOk || !install?.ok || (scenario === "npm-preinstall" ? !launchOk(launches.baseline) : false);
 process.exit(failed ? 1 : 0);
