@@ -98,6 +98,14 @@ async function step(name, action, settleMs = 6000) {
   return entry;
 }
 
+// Diagnostic: record every helper / node / npm / installer process FyAgent
+// spawns (pid, parent, command line, exit) so helper failures can be located.
+{
+  const trace = join(out, "proc-trace.jsonl").replace(/'/g, "''");
+  const ps = `$seen = @{}; $end = (Get-Date).AddMinutes(25); while ((Get-Date) -lt $end) { Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'fyagent-user-helper|node|npm|cmd|claude|grok|AppInstaller|msiexec|Setup' } | ForEach-Object { if (-not $seen.ContainsKey($_.ProcessId)) { $seen[$_.ProcessId] = 1; [ordered]@{ at = (Get-Date).ToUniversalTime().ToString('o'); pid = $_.ProcessId; ppid = $_.ParentProcessId; name = $_.Name; cmd = $_.CommandLine; path = $_.ExecutablePath } | ConvertTo-Json -Compress | Add-Content -Encoding utf8 '${trace}' } }; Start-Sleep -Milliseconds 400 }`;
+  spawn("powershell", ["-NoProfile", "-Command", ps], { detached: true, stdio: "ignore" }).unref();
+}
+
 try {
   const { page } = await findTarget(port, 90000);
   cdp = await connect(page.webSocketDebuggerUrl);
@@ -129,6 +137,8 @@ try {
   report.readinessAtDirectory = {};
   for (const id of ["claude-code", "grokbuild", "opencode", "codex"]) report.readinessAtDirectory[id] = await evaluate(cdp, INVOKE("get_agent_install_readiness", { agentId: id }));
   report.toolVersionsAtDirectory = await evaluate(cdp, INVOKE("get_tool_versions", {}));
+  // Same two helper-backed reads fired concurrently, as the directory scan does.
+  report.concurrentReadiness = await evaluate(cdp, `(async () => { const inv = (id) => window.__TAURI_INTERNALS__.invoke("get_agent_install_readiness", { agentId: id }).then((v) => ({ id, installState: v.installState }), (e) => ({ id, error: String(e) })); return Promise.all([inv("claude-code"), inv("grokbuild"), inv("claude-code"), inv("grokbuild")]); })()`);
 
   for (const name of agents) {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
