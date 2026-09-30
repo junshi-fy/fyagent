@@ -7,6 +7,14 @@
 name: Installer Smoke (VM)
 
 on:
+  # workflow_dispatch is the intended entry point. The narrow push trigger only
+  # registers this non-default-branch workflow and re-runs it with defaults
+  # when the smoke scripts themselves change on the dedicated branch.
+  push:
+    branches: [test/installer-smoke]
+    paths:
+      - .github/workflows/installer-smoke.yml
+      - .github/installer-smoke/**
   workflow_dispatch:
     inputs:
       tag:
@@ -29,7 +37,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: installer-smoke-${{ inputs.tag }}
+  group: installer-smoke-${{ inputs.tag || 'v0.4.9' }}
   cancel-in-progress: false
 
 jobs:
@@ -55,8 +63,8 @@ jobs:
             arch: universal
     env:
       SMOKE_ID: ${{ matrix.id }}
-      SMOKE_TAG: ${{ inputs.tag }}
-      SMOKE_REPO: ${{ inputs.source_repo }}
+      SMOKE_TAG: ${{ inputs.tag || 'v0.4.9' }}
+      SMOKE_REPO: ${{ inputs.source_repo || 'fy-agent/fyagent' }}
       SMOKE_PLATFORM: ${{ matrix.platform }}
       SMOKE_ARCH: ${{ matrix.arch }}
       SMOKE_OUT: ${{ github.workspace }}/smoke-out
@@ -106,7 +114,7 @@ jobs:
           fi
 
       - name: Install agent CLIs via npm
-        if: inputs.install_agent_tools
+        if: github.event_name == 'push' || inputs.install_agent_tools
         continue-on-error: true
         shell: bash
         run: |
@@ -117,7 +125,7 @@ jobs:
           fi
 
       - name: Install OpenCode Desktop (official stable installer)
-        if: inputs.install_agent_tools
+        if: github.event_name == 'push' || inputs.install_agent_tools
         continue-on-error: true
         shell: bash
         run: |
@@ -128,7 +136,7 @@ jobs:
           fi
 
       - name: Launch and detect (after tools)
-        if: inputs.install_agent_tools
+        if: github.event_name == 'push' || inputs.install_agent_tools
         continue-on-error: true
         shell: bash
         run: |
@@ -147,7 +155,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: installer-smoke-${{ inputs.tag }}-${{ matrix.id }}
+          name: installer-smoke-${{ inputs.tag || 'v0.4.9' }}-${{ matrix.id }}
           path: |
             smoke-out
             !smoke-out/assets/*.exe
