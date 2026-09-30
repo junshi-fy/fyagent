@@ -5,7 +5,8 @@
 // Usage: node cdp-e2e.mjs   Env: SMOKE_OUT, SMOKE_CDP_PORT, SMOKE_E2E_AGENTS, SMOKE_E2E_WAIT_S
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { connect, evaluate, findTarget, sleep } from "./cdp-lib.mjs";
 
 const out = process.env.SMOKE_OUT ?? "smoke-out";
@@ -98,13 +99,14 @@ async function step(name, action, settleMs = 6000) {
   return entry;
 }
 
-// Diagnostic: record every helper / node / npm / installer process FyAgent
-// spawns (pid, parent, command line, exit) so helper failures can be located.
-{
-  const trace = join(out, "proc-trace.jsonl").replace(/'/g, "''");
-  const ps = `$seen = @{}; $end = (Get-Date).AddMinutes(25); while ((Get-Date) -lt $end) { Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'fyagent-user-helper|node|npm|cmd|claude|grok|AppInstaller|msiexec|Setup' } | ForEach-Object { if (-not $seen.ContainsKey($_.ProcessId)) { $seen[$_.ProcessId] = 1; [ordered]@{ at = (Get-Date).ToUniversalTime().ToString('o'); pid = $_.ProcessId; ppid = $_.ParentProcessId; name = $_.Name; cmd = $_.CommandLine; path = $_.ExecutablePath } | ConvertTo-Json -Compress | Add-Content -Encoding utf8 '${trace}' } }; Start-Sleep -Milliseconds 400 }`;
-  spawn("powershell", ["-NoProfile", "-Command", ps], { detached: true, stdio: "ignore" }).unref();
+// Diagnostics (detached, 25 min): helper/process trace and native identity
+// watch of the package-bridge ancestor directories. See diag-watch.ps1.
+const here = dirname(fileURLToPath(import.meta.url));
+function diag(mode, extra = []) {
+  spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(here, "diag-watch.ps1"), "-Mode", mode, "-Out", resolve(out), ...extra], { detached: true, stdio: "ignore", windowsHide: true }).unref();
 }
+diag("procs");
+diag("bridge");
 
 try {
   const { page } = await findTarget(port, 90000);
@@ -129,8 +131,7 @@ try {
   // while installs run (normal Windows activity in e.g. C:\ProgramData).
   const churnDir = process.env.SMOKE_E2E_CHURN_DIR;
   if (churnDir) {
-    const script = `$d = '${churnDir.replace(/'/g, "''")}'; $end = (Get-Date).AddMinutes(20); $i = 0; while ((Get-Date) -lt $end) { $i++; New-Item -ItemType Directory -Force -Path (Join-Path $d ("smoke-churn-" + $i)) | Out-Null; Start-Sleep -Milliseconds 200 }`;
-    spawn("powershell", ["-NoProfile", "-Command", script], { detached: true, stdio: "ignore" }).unref();
+    diag("churn", ["-Dir", churnDir]);
     report.churn = { dir: churnDir, startedAt: new Date().toISOString(), everyMs: 200 };
   }
   report.directoryCards = await evaluate(cdp, CARD_SUMMARY);
