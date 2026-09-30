@@ -90,12 +90,25 @@ PY
       osascript -l JavaScript "$AXJS" dump > "$OUT/ax-text-$LABEL-$slug.txt" 2>&1
       shot "desktop-$LABEL-$slug.png" >> "$OUT/ax-walk-$LABEL.log"
     }
-    ax_step skip-guide "跳过引导"
+    # The WebView may still be loading (elements=6) at the first attempt: retry.
+    for _i in 1 2 3 4 5 6 7 8 9 10; do
+      R="$(osascript -l JavaScript "$AXJS" click "跳过引导" 2>&1)"
+      echo "[skip-guide#$_i] $R" >> "$OUT/ax-walk-$LABEL.log"
+      case "$R" in clicked*) break ;; esac
+      sleep 6
+    done
+    ax_step skip-guide
+    ax_step directory "AI软件配置"
+    sleep 20
+    ax_step directory-settled
     ax_step agent-opencode "AI软件配置" "OpenCode"
     ax_step agent-codex "AI软件配置" "Codex"
     ax_step agent-claude-code "AI软件配置" "Claude Code"
     ax_step agent-grokbuild "AI软件配置" "Grok Build"
     ax_step health "运行状态"
+    ax_step health-checkall "检查全部软件"
+    sleep 40
+    ax_step health-settled
     ALIVE_AFTER=false; kill -0 "$PID" 2>/dev/null && ALIVE_AFTER=true
     osascript -e 'tell application "FyAgent" to quit' >/dev/null 2>&1
     sleep 5
