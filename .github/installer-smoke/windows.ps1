@@ -1,4 +1,4 @@
-# Installer smoke test on a throwaway GitHub-hosted Windows VM.
+﻿# Installer smoke test on a throwaway GitHub-hosted Windows VM.
 # Phases: install | probe <label> | tools | opencode-desktop
 # Env: SMOKE_OUT, SMOKE_ASSET (verified setup.exe path)
 param(
@@ -165,6 +165,14 @@ switch ($Phase) {
       Select-Object ProcessName, Id, @{n = "mainWindowTitle"; e = { $_.MainWindowTitle } }, @{n = "path"; e = { $_.Path } })
     Push-Location $ScriptDir
     if ($Phase -eq "e2e") {
+      # Diagnostics (hidden, 25 min): helper process trace and package-bridge
+      # ancestor identity watch; optional sibling-directory churn.
+      $diag = Join-Path $ScriptDir "diag-watch.ps1"
+      $modes = @(@("-Mode", "procs"), @("-Mode", "bridge"))
+      if ($env:SMOKE_E2E_CHURN_DIR) { $modes += , @("-Mode", "churn", "-Dir", "`"$($env:SMOKE_E2E_CHURN_DIR)`"") }
+      foreach ($m in $modes) {
+        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -ArgumentList (@("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$diag`"", "-Out", "`"$Out`"") + $m) | Out-Null
+      }
       node (Join-Path $ScriptDir "cdp-e2e.mjs")
       $result.e2eExit = $LASTEXITCODE
     }

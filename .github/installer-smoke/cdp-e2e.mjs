@@ -5,8 +5,7 @@
 // Usage: node cdp-e2e.mjs   Env: SMOKE_OUT, SMOKE_CDP_PORT, SMOKE_E2E_AGENTS, SMOKE_E2E_WAIT_S
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { connect, evaluate, findTarget, sleep } from "./cdp-lib.mjs";
 
 const out = process.env.SMOKE_OUT ?? "smoke-out";
@@ -99,14 +98,7 @@ async function step(name, action, settleMs = 6000) {
   return entry;
 }
 
-// Diagnostics (detached, 25 min): helper/process trace and native identity
-// watch of the package-bridge ancestor directories. See diag-watch.ps1.
-const here = dirname(fileURLToPath(import.meta.url));
-function diag(mode, extra = []) {
-  spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(here, "diag-watch.ps1"), "-Mode", mode, "-Out", resolve(out), ...extra], { detached: true, stdio: "ignore", windowsHide: true }).unref();
-}
-diag("procs");
-diag("bridge");
+// Diagnostics (proc trace, bridge identity watch, churn) are started by windows.ps1.
 
 try {
   const { page } = await findTarget(port, 90000);
@@ -131,7 +123,6 @@ try {
   // while installs run (normal Windows activity in e.g. C:\ProgramData).
   const churnDir = process.env.SMOKE_E2E_CHURN_DIR;
   if (churnDir) {
-    diag("churn", ["-Dir", churnDir]);
     report.churn = { dir: churnDir, startedAt: new Date().toISOString(), everyMs: 200 };
   }
   report.directoryCards = await evaluate(cdp, CARD_SUMMARY);
