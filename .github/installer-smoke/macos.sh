@@ -154,13 +154,15 @@ PY
       snap "$SLUG-confirm"
       END=$(( $(date +%s) + WAIT_S )); I=0
       while [ "$(date +%s)" -lt "$END" ]; do
-        sleep 30; I=$((I+1))
-        osascript -l JavaScript "$AXJS" dump > "$OUT/e2e-current.txt" 2>&1
-        [ $((I % 2)) -eq 0 ] && snap "$SLUG-wait$I"
-        grep -q -E "正在|安装中|下载中|准备|等待" "$OUT/e2e-current.txt" || break
+        sleep 20; I=$((I+1))
+        STATE="$(osascript -l JavaScript "$AXJS" cardstate "$NAME" 2>&1)"
+        echo "  [$SLUG t+$((I*20))s] ${STATE:0:300}" >> "$LOG"
+        [ $((I % 3)) -eq 0 ] && snap "$SLUG-wait$I"
+        case "$STATE" in busy*) ;; *) break ;; esac
       done
       snap "$SLUG-settled"
-      ax click "关闭" >/dev/null; ax click "取消" >/dev/null
+      # Never press "取消" here: in a card it cancels the running install job.
+      ax click "关闭" >/dev/null
     done
     ax click "AI软件配置" >/dev/null; sleep 3; ax click "重新扫描" >/dev/null; sleep 20
     snap rescan

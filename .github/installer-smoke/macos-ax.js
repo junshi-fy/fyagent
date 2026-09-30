@@ -53,11 +53,23 @@ function run(argv) {
         if (!seenAnchor && role === "AXHeading" && texts.includes(a1)) seenAnchor = true;
         else if (seenAnchor && role === "AXHeading" && texts.some((t) => t)) return `NO BUTTON (card "${a1}" has no "${a2}"; next heading ${texts.find((t) => t)})`;
         else if (seenAnchor && clickable && texts.includes(a2)) return press(el, role, `${a1} > ${a2}`);
+      } else if (mode === "cardstate") {
+        // "busy ..." while the card owns a running job (its only button is 取消
+        // or a progress indicator is shown), otherwise "idle <card text>".
+        if (!seenAnchor && role === "AXHeading" && texts.includes(a1)) { seenAnchor = true; continue; }
+        if (!seenAnchor) continue;
+        if (role === "AXHeading" && texts.some((t) => t)) break;
+        if ((clickable && texts.includes("取消")) || role === "AXProgressIndicator" || role === "AXBusyIndicator") lines.push("__BUSY__");
+        if (texts.some((t) => t)) lines.push(texts.find((t) => t));
       } else if (texts.some((t) => t)) {
         lines.push([role, ...texts].join("\t"));
       }
     }
   }
   if (mode === "dump") return lines.join("\n");
+  if (mode === "cardstate") {
+    if (!seenAnchor) return `NO CARD ${a1}`;
+    return (lines.includes("__BUSY__") ? "busy " : "idle ") + lines.filter((l) => l !== "__BUSY__").join(" | ");
+  }
   return `NOT FOUND (${mode} "${a1}" "${a2}", anchorSeen=${seenAnchor}, elements=${count}, windows=${wins.length})`;
 }

@@ -118,6 +118,9 @@ try {
   await step("directory", `location.hash = "#/agents"; "ok"`, 10000);
   report.directoryText = await evaluate(cdp, "document.body.innerText.slice(0, 20000)");
   report.directoryCards = await evaluate(cdp, CARD_SUMMARY);
+  report.readinessAtDirectory = {};
+  for (const id of ["claude-code", "grokbuild", "opencode", "codex"]) report.readinessAtDirectory[id] = await evaluate(cdp, INVOKE("get_agent_install_readiness", { agentId: id }));
+  report.toolVersionsAtDirectory = await evaluate(cdp, INVOKE("get_tool_versions", {}));
 
   for (const name of agents) {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -138,6 +141,19 @@ try {
     product.sourceDisclosure = await evaluate(cdp, `(() => { document.querySelectorAll("[role=dialog] details, [role=alertdialog] details").forEach((d) => { d.open = true; }); return [...document.querySelectorAll("[role=dialog], [role=alertdialog]")].map((d) => d.innerText + "\\n" + [...d.querySelectorAll("a[href]")].map((a) => a.href).join("\\n")).join("\\n---\\n").slice(0, 4000); })()`);
     const s2 = await step(`${slug}-confirm`, CLICK_TEXT("确认安装"), 10000);
     product.confirm = s2.action;
+    // Vendor GUI installers (FyAgent says "请在官方窗口完成安装"): act as the
+    // user in that official wizard through UI Automation, then let FyAgent re-detect.
+    if (/官方窗口|官方安装窗口/.test(product.confirmationDialog ?? "") && process.env.SMOKE_E2E_DRIVE_WIZARDS !== "0") {
+      await sleep(20000);
+      await step(`${slug}-wizard-open`, null, 500);
+      try {
+        execFileSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(import.meta.dirname, "wizard.ps1"), "-Out", out, "-Tag", slug, "-TimeoutS", "300"], { timeout: 330000 });
+      } catch (error) {
+        product.wizardError = String(error).slice(0, 500);
+      }
+      product.wizard = `wizard-${slug}.json`;
+      await step(`${slug}-wizard-done`, null, 500);
+    }
     const deadline = Date.now() + waitS * 1000;
     let last = null;
     let i = 0;
@@ -156,9 +172,8 @@ try {
     if (name === "Codex") product.codexJob = await evaluate(cdp, INVOKE("codex_desktop_get_job"));
     product.finishedAt = new Date().toISOString();
     report.products.push(product);
-    // Close any lingering dialog before the next product.
-    await evaluate(cdp, CLICK_TEXT("关闭"));
-    await evaluate(cdp, CLICK_TEXT("取消"));
+    // Close a lingering dialog only; never press a card's job "取消".
+    await evaluate(cdp, `(() => { const d = document.querySelector("[role=dialog], [role=alertdialog]"); if (!d) return "none"; const b = [...d.querySelectorAll("button")].find((x) => ["关闭", "取消", "完成", "知道了"].includes((x.innerText || "").trim())); if (b) { b.click(); return "closed"; } return "no button"; })()`);
   }
   await rescan();
   await step("rescan", null, 12000);
