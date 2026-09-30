@@ -1,54 +1,58 @@
-// JXA helper (osascript -l JavaScript) for the macOS smoke VM.
-// Uses the Accessibility tree of the running FyAgent window, which exposes the
-// WKWebView content as AX elements. Only reads text and clicks visible
-// navigation buttons (no install/update actions).
-//   osascript -l JavaScript macos-ax.js dump
-//   osascript -l JavaScript macos-ax.js click "<exact text>"
+// JXA helper (osascript -l JavaScript) for the macOS smoke VM. Reads and clicks
+// the FyAgent window through the Accessibility tree (WKWebView content is
+// exposed as AX elements).
+//   dump                         -> role/name/desc/title/value lines
+//   click <text>                 -> press the first button/link whose label is <text>
+//   clickafter <anchor> <text>   -> press the first <text> button after the element labelled <anchor>
 function run(argv) {
+  const norm = (s) => String(s || "").normalize("NFC").replace(/\s+/g, " ").trim();
   const mode = argv[0] || "dump";
-  const target = argv[1] || "";
+  const a1 = norm(argv[1]);
+  const a2 = norm(argv[2]);
   const se = Application("System Events");
   const procs = se.processes.whose({ name: "fyagent" });
   if (procs.length === 0) return "ERROR: fyagent process not found";
   const proc = procs[0];
-  if (proc.windows.length === 0) return "ERROR: no window";
-  const win = proc.windows[0];
-  const all = win.entireContents();
+  const wins = proc.windows();
+  if (!wins.length) return "ERROR: no window";
   const get = (el, f) => {
+    try { return norm(el[f]()); } catch (e) { return ""; }
+  };
+  const press = (el, role, label) => {
     try {
-      const v = el[f]();
-      return v === null || v === undefined ? "" : String(v);
+      el.actions.byName("AXPress").perform();
+      return `clicked(AXPress) ${role} "${label}"`;
     } catch (e) {
-      return "";
+      try {
+        const pos = el.position();
+        const size = el.size();
+        se.click({ at: [pos[0] + size[0] / 2, pos[1] + size[1] / 2] });
+        return `clicked(at) ${role} "${label}"`;
+      } catch (e2) {
+        return `ERROR: click failed on ${role} "${label}": ${e2}`;
+      }
     }
   };
   const lines = [];
-  for (const el of all) {
-    const role = get(el, "role");
-    const name = get(el, "name");
-    const desc = get(el, "description");
-    const title = get(el, "title");
-    const value = get(el, "value");
-    if (mode === "click") {
-      const texts = [name, desc, title, value].map((t) => t.trim());
-      if (texts.includes(target)) {
-        try {
-          el.actions.byName("AXPress").perform();
-          return `clicked(AXPress) ${role} "${target}"`;
-        } catch (e) {
-          try {
-            const pos = el.position();
-            const size = el.size();
-            se.click({ at: [pos[0] + size[0] / 2, pos[1] + size[1] / 2] });
-            return `clicked(at) ${role} "${target}"`;
-          } catch (e2) {
-            return `ERROR: found ${role} "${target}" but click failed: ${e2}`;
-          }
-        }
+  let seenAnchor = false;
+  let count = 0;
+  for (const win of wins) {
+    const all = win.entireContents();
+    for (const el of all) {
+      count += 1;
+      const role = get(el, "role");
+      const texts = [get(el, "name"), get(el, "description"), get(el, "title"), get(el, "value")];
+      const clickable = role === "AXButton" || role === "AXLink" || role === "AXMenuItem";
+      if (mode === "click") {
+        if (clickable && texts.includes(a1)) return press(el, role, a1);
+      } else if (mode === "clickafter") {
+        if (!seenAnchor && texts.includes(a1)) seenAnchor = true;
+        else if (seenAnchor && clickable && texts.includes(a2)) return press(el, role, `${a1} > ${a2}`);
+      } else if (texts.some((t) => t)) {
+        lines.push([role, ...texts].join("\t"));
       }
-    } else if (name || desc || title || value) {
-      lines.push([role, name, desc, title, value].map((s) => s.replace(/\s+/g, " ")).join("\t"));
     }
   }
-  return mode === "click" ? `NOT FOUND: "${target}"` : lines.join("\n");
+  if (mode === "dump") return lines.join("\n");
+  return `NOT FOUND (${mode} "${a1}" "${a2}", anchorSeen=${seenAnchor}, elements=${count}, windows=${wins.length})`;
 }

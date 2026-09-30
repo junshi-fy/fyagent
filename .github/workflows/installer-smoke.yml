@@ -27,11 +27,14 @@ on:
         required: true
         default: fy-agent/fyagent
         type: string
-      install_agent_tools:
-        description: Install agent CLIs / OpenCode Desktop and re-run detection
+      scenario:
+        description: "fyagent-e2e: clean VM, install tools through FyAgent's own UI; npm-preinstall: install tools via npm/official installer first, then compare FyAgent detection"
         required: true
-        default: true
-        type: boolean
+        default: fyagent-e2e
+        type: choice
+        options:
+          - fyagent-e2e
+          - npm-preinstall
 
 permissions:
   contents: read
@@ -44,7 +47,7 @@ jobs:
   smoke:
     name: ${{ matrix.id }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -68,6 +71,8 @@ jobs:
       SMOKE_PLATFORM: ${{ matrix.platform }}
       SMOKE_ARCH: ${{ matrix.arch }}
       SMOKE_OUT: ${{ github.workspace }}/smoke-out
+      SMOKE_SCENARIO: ${{ inputs.scenario || 'fyagent-e2e' }}
+      SMOKE_E2E_WAIT_S: "240"
     steps:
       - name: Check out smoke scripts only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -103,7 +108,23 @@ jobs:
           SMOKE_ASSET: ${{ steps.fetch.outputs.asset }}
         run: ./.github/installer-smoke/macos.sh install
 
+      - name: "E2E: onboarding and one-click installs through FyAgent UI"
+        if: env.SMOKE_SCENARIO == 'fyagent-e2e'
+        continue-on-error: true
+        timeout-minutes: 45
+        shell: bash
+        run: |
+          if [ "$SMOKE_PLATFORM" = windows ]; then
+            pwsh -File .github/installer-smoke/windows.ps1 -Phase e2e -Label after-e2e
+            pwsh -File .github/installer-smoke/windows.ps1 -Phase opencode-desktop -Label locate
+          else
+            ./.github/installer-smoke/macos.sh e2e
+            ./.github/installer-smoke/macos.sh probe after-e2e
+          fi
+          node .github/installer-smoke/cli-versions.mjs after-e2e
+
       - name: Launch and detect (baseline)
+        if: env.SMOKE_SCENARIO == 'npm-preinstall'
         continue-on-error: true
         shell: bash
         run: |
@@ -114,7 +135,7 @@ jobs:
           fi
 
       - name: Install agent CLIs via npm
-        if: github.event_name == 'push' || inputs.install_agent_tools
+        if: env.SMOKE_SCENARIO == 'npm-preinstall'
         continue-on-error: true
         shell: bash
         run: |
@@ -125,7 +146,7 @@ jobs:
           fi
 
       - name: Install OpenCode Desktop (official stable installer)
-        if: github.event_name == 'push' || inputs.install_agent_tools
+        if: env.SMOKE_SCENARIO == 'npm-preinstall'
         continue-on-error: true
         shell: bash
         run: |
@@ -136,7 +157,7 @@ jobs:
           fi
 
       - name: Launch and detect (after tools)
-        if: github.event_name == 'push' || inputs.install_agent_tools
+        if: env.SMOKE_SCENARIO == 'npm-preinstall'
         continue-on-error: true
         shell: bash
         run: |
@@ -145,6 +166,7 @@ jobs:
           else
             ./.github/installer-smoke/macos.sh probe after-tools
           fi
+          node .github/installer-smoke/cli-versions.mjs after-tools
 
       - name: Summarize
         if: always()
@@ -155,7 +177,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: installer-smoke-${{ inputs.tag || 'v0.4.9' }}-${{ matrix.id }}
+          name: installer-smoke-${{ inputs.tag || 'v0.4.9' }}-${{ inputs.scenario || 'fyagent-e2e' }}-${{ matrix.id }}
           path: |
             smoke-out
             !smoke-out/assets/*.exe

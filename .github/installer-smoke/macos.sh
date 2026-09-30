@@ -116,6 +116,61 @@ print(json.dumps(res, indent=2, ensure_ascii=False))
 PY
     ;;
 
+  e2e)
+    # First-time user flow driven through the Accessibility tree: onboarding ->
+    # "编程开发" -> all software -> FyAgent's own "一键安装" + "确认安装" per card.
+    EXE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exe"])' "$OUT/install.json")"
+    AXJS="$(dirname "$0")/macos-ax.js"
+    WAIT_S="${SMOKE_E2E_WAIT_S:-300}"
+    IFS=',' read -r -a AGENTS <<< "${SMOKE_E2E_AGENTS:-Claude Code,OpenCode,Codex,Grok Build,QoderWork CN,TRAE Work CN,WorkBuddy}"
+    LOG="$OUT/e2e-walk.log"; : > "$LOG"
+    N=0
+    snap() { # <name>
+      N=$((N+1)); local tag; tag="$(printf '%02d' "$N")-$1"
+      osascript -l JavaScript "$AXJS" dump > "$OUT/e2e-$tag.txt" 2>&1
+      echo "[$tag] screenshot $(shot "e2e-$tag.png")" >> "$LOG"
+    }
+    ax() { local r; r="$(osascript -l JavaScript "$AXJS" "$@" 2>&1)"; echo "  ax $*: $r" >> "$LOG"; echo "$r"; }
+    "$EXE" > "$OUT/app-stdout-e2e.log" 2> "$OUT/app-stderr-e2e.log" &
+    PID=$!
+    sleep 25
+    osascript -e 'tell application "FyAgent" to activate' >/dev/null 2>&1
+    sleep 3
+    snap first-run
+    ax click "编程开发" >/dev/null; sleep 5; snap pick-coding
+    R="$(ax click "查看全部软件")"; sleep 5
+    case "$R" in clicked*) ;; *) ax click "跳过引导" >/dev/null; sleep 5 ;; esac
+    snap directory
+    for NAME in "${AGENTS[@]}"; do
+      SLUG="$(echo "$NAME" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/-*$//')"
+      echo "== $NAME" >> "$LOG"
+      ax click "AI软件配置" >/dev/null; sleep 4
+      R="$(ax clickafter "$NAME" "一键安装")"; sleep 6
+      snap "$SLUG-oneclick"
+      case "$R" in clicked*) ;; *) echo "  skip: $R" >> "$LOG"; continue ;; esac
+      ax click "查看本次安装包来源" >/dev/null; sleep 2
+      snap "$SLUG-dialog"
+      ax click "确认安装" >/dev/null; sleep 10
+      snap "$SLUG-confirm"
+      END=$(( $(date +%s) + WAIT_S )); I=0
+      while [ "$(date +%s)" -lt "$END" ]; do
+        sleep 30; I=$((I+1))
+        osascript -l JavaScript "$AXJS" dump > "$OUT/e2e-current.txt" 2>&1
+        [ $((I % 2)) -eq 0 ] && snap "$SLUG-wait$I"
+        grep -q -E "正在|安装中|下载中|准备|等待" "$OUT/e2e-current.txt" || break
+      done
+      snap "$SLUG-settled"
+      ax click "关闭" >/dev/null; ax click "取消" >/dev/null
+    done
+    ax click "AI软件配置" >/dev/null; sleep 3; ax click "重新扫描" >/dev/null; sleep 20
+    snap rescan
+    ALIVE=false; kill -0 "$PID" 2>/dev/null && ALIVE=true
+    echo "alive_at_end=$ALIVE" >> "$LOG"
+    osascript -e 'tell application "FyAgent" to quit' >/dev/null 2>&1; sleep 5
+    kill "$PID" 2>/dev/null; sleep 2; kill -9 "$PID" 2>/dev/null
+    if [ -d "$HOME/.fyagent/logs" ]; then mkdir -p "$OUT/fyagent-logs-e2e"; cp -R "$HOME/.fyagent/logs/." "$OUT/fyagent-logs-e2e/"; fi
+    ;;
+
   tools)
     export npm_config_loglevel=error
     : > "$OUT/tools.tsv"

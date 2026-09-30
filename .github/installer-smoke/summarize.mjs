@@ -20,7 +20,11 @@ const install = load("install.json");
 const npmLatest = load("npm-latest.json");
 const tools = load("tools-install.json");
 const opencode = load("opencode-desktop.json");
-const labels = ["baseline", "after-tools"];
+const scenario = process.env.SMOKE_SCENARIO ?? "npm-preinstall";
+const labels = scenario === "fyagent-e2e" ? ["after-e2e"] : ["baseline", "after-tools"];
+const e2e = load("e2e.json");
+const cliAfter = load(scenario === "fyagent-e2e" ? "cli-versions-after-e2e.json" : "cli-versions-after-tools.json");
+const opencodeE2e = load("opencode-desktop-e2e.json");
 const launches = Object.fromEntries(labels.map((l) => [l, load(`launch-${l}.json`)]));
 const probes = Object.fromEntries(labels.map((l) => [l, load(`probe-${l}.json`)]));
 
@@ -63,7 +67,7 @@ const semverIn = (s) => (s ?? "").match(/\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.]+)?/)?.
 
 const comparison = (tools?.results ?? []).map((r) => {
   const installed = semverIn(r.versionOutput);
-  const appRow = det["after-tools"]?.toolVersions?.find((t) => t.tool === r.tool) ?? null;
+  const appRow = det[labels[labels.length - 1]]?.toolVersions?.find((t) => t.tool === r.tool) ?? null;
   const npm = latestByPkg[r.pkg] ?? null;
   return {
     tool: r.tool,
@@ -106,12 +110,16 @@ const summary = {
   npmLatest,
   comparison,
   opencodeDesktop: opencode,
+  scenario,
+  e2e: e2e ? { ok: e2e.ok ?? false, error: e2e.error ?? null, products: e2e.products ?? [] } : null,
+  opencodeDesktopAfterE2e: opencodeE2e,
+  toolsPresent: cliAfter,
 };
 writeFileSync(join(out, "summary.json"), JSON.stringify(summary, null, 2));
 
 const yn = (v) => (v === true ? "是" : v === false ? "否" : "—");
 const md = [];
-md.push(`# ${id} 安装冒烟（虚拟机实测，GitHub-hosted VM）`, "");
+md.push(`# ${id} 安装冒烟（虚拟机实测，GitHub-hosted VM）— 场景 ${scenario}`, "");
 md.push(`- Tag：${sha?.tag ?? "?"}；manifest sourceSha：${sha?.manifestSourceSha ?? "?"}；生成时间（UTC）：${summary.generatedAt}`, "");
 md.push("## SHA-256（本 runner 实算 vs 官方 manifest）", "", "| 文件 | 本机实算 | manifest | 一致 | provenance 一致 |", "| --- | --- | --- | --- | --- |");
 for (const c of sha?.checks ?? []) md.push(`| ${c.name} | \`${c.actualSha256}\` | \`${c.manifestSha256}\` | ${yn(c.shaMatch && c.sizeMatch)} | ${yn(c.provenanceMatch)} |`);
@@ -148,10 +156,27 @@ if (opencode) {
   }
   if (opencode.infoPlist) md.push(`- Bundle：${opencode.infoPlist.CFBundleIdentifier} ${opencode.infoPlist.CFBundleShortVersionString}；与代码一致：${yn(opencode.bundleIdMatchesCode)}`);
 }
-md.push("", "## 限制", "", "- 这是 GitHub-hosted 虚拟机实测，不等于真机通过。", "- runner 以管理员身份运行，UAC 提示和 SmartScreen 界面不可观察；#68 验收中的 SmartScreen 警告和 UAC 提示不在覆盖范围内。");
+if (e2e) {
+  md.push("", "## 端到端：通过 FyAgent 自身按钮安装", "", `- 驱动结果：${e2e.ok ? "完成" : "中断"} ${e2e.error ? "(" + String(e2e.error).split("\n")[0] + ")" : ""}`);
+  md.push("", "| 产品 | 一键安装 | 确认安装 | 结束时卡片文字 |", "| --- | --- | --- | --- |");
+  for (const p of e2e.products ?? []) md.push(`| ${p.name} | ${p.oneClick ?? "—"} | ${p.confirm ?? "—"} | ${String(p.after ?? p.result ?? "").replace(/\s+/g, " ").slice(0, 160)} |`);
+}
+if (existsSync(join(out, "e2e-walk.log"))) md.push("", "## 端到端（macOS AX 驱动日志）", "", "```", readFileSync(join(out, "e2e-walk.log"), "utf8").slice(0, 6000), "```");
+if (opencodeE2e) {
+  const seen = new Set();
+  md.push("", "## FyAgent 安装后的 OpenCode Desktop 位置", "");
+  for (const f of (opencodeE2e.foundExecutables ?? []).filter((x) => !seen.has(x.path) && seen.add(x.path))) md.push(`- \`${f.path}\`（${f.versionInfo?.productVersion ?? ""}，PE ${f.peMachine ?? "?"}）`);
+  md.push(`- 命中代码候选路径：${yn(opencodeE2e.matchesCodeCandidate)}`);
+}
+if (cliAfter) {
+  md.push("", "## 场景结束时实际存在的工具（不经 FyAgent，直接 --version）", "", "| 命令 | PATH 命中 | --version | 其他位置 |", "| --- | --- | --- | --- |");
+  for (const t of cliAfter.tools ?? []) md.push(`| ${t.bin} | ${t.where ?? "—"} | ${t.version ?? "—"} | ${(t.extra ?? []).map((x) => x.path + " " + (x.version ?? "")).join("; ")} |`);
+  for (const a of cliAfter.apps ?? []) md.push(`- App：${a.path} ${a.bundleId ?? ""} ${a.version ?? ""}`);
+}
+md.push("", "## 限制", "", "- 这是 GitHub-hosted 虚拟机实测，不等于真机通过。", "- runner 以管理员身份运行，UAC 提示和 SmartScreen 界面不可观察；#68 验收中的 SmartScreen 警告和 UAC 提示不在覆盖范围内。", "- 未覆盖中国大陆网络环境和 npm 镜像路径（npmmirror 等）；runner 位于境外，直连 npmjs。npmmirror 目前仍把 Grok latest 标成 0.1.4（官方 1.0.44），FyAgent 没有让用户选择镜像的设置，本次未强制镜像场景。", "- Windows ARM64：npm-preinstall 场景直接装的是 OpenCode 官方 win-x64 安装包（仿真运行），不代表 ARM 用户；FyAgent 自身下载哪个构建以端到端场景的记录为准。");
 writeFileSync(join(out, "summary.md"), md.join("\n") + "\n");
 if (process.env.GITHUB_STEP_SUMMARY) writeFileSync(process.env.GITHUB_STEP_SUMMARY, md.join("\n") + "\n", { flag: "a" });
 console.log(md.join("\n"));
 
-const failed = !sha?.ok || !install?.ok || !launchOk(launches.baseline);
+const failed = !sha?.ok || !install?.ok || (scenario === "npm-preinstall" ? !launchOk(launches.baseline) : false);
 process.exit(failed ? 1 : 0);

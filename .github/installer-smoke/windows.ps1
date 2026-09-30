@@ -68,6 +68,15 @@ function Save-DesktopScreenshot($Name) {
   } catch { return "screenshot failed: $_" }
 }
 
+function Get-PeMachine($Path) {
+  try {
+    $fs = [IO.File]::OpenRead($Path); $br = New-Object IO.BinaryReader($fs)
+    $fs.Seek(0x3C, 'Begin') | Out-Null; $off = $br.ReadInt32()
+    $fs.Seek($off + 4, 'Begin') | Out-Null; $m = $br.ReadUInt16(); $fs.Close()
+    switch ($m) { 0x8664 { "x64" } 0xAA64 { "arm64" } 0x014C { "x86" } default { "0x{0:X4}" -f $m } }
+  } catch { "unknown" }
+}
+
 function Get-FyAgentExe {
   $state = Get-Content (Join-Path $Out "install.json") -Raw | ConvertFrom-Json
   return $state.exe
@@ -128,7 +137,7 @@ switch ($Phase) {
     if (-not $result.ok) { exit 1 }
   }
 
-  "probe" {
+  { $_ -in @("probe", "e2e") } {
     $exe = Get-FyAgentExe
     $port = 9222
     $env:SMOKE_CDP_PORT = "$port"
@@ -155,6 +164,10 @@ switch ($Phase) {
     $result.processes = @(Get-Process | Where-Object { $_.ProcessName -match "fyagent|msedgewebview2" } |
       Select-Object ProcessName, Id, @{n = "mainWindowTitle"; e = { $_.MainWindowTitle } }, @{n = "path"; e = { $_.Path } })
     Push-Location $ScriptDir
+    if ($Phase -eq "e2e") {
+      node (Join-Path $ScriptDir "cdp-e2e.mjs")
+      $result.e2eExit = $LASTEXITCODE
+    }
     node (Join-Path $ScriptDir "cdp-probe.mjs") $Label
     Pop-Location
     $result.desktopScreenshot = "desktop-$Label.png"
@@ -207,15 +220,17 @@ switch ($Phase) {
   }
 
   "opencode-desktop" {
-    $url = "https://opencode.ai/download/stable/windows-x64-nsis"
+    $locateOnly = $Label -eq "locate"
+    $url = if ($env:SMOKE_OPENCODE_URL) { $env:SMOKE_OPENCODE_URL } else { "https://opencode.ai/download/stable/windows-x64-nsis" }
     $dest = Join-Path $Out "assets\opencode-desktop-setup.exe"
     New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
-    $result = [ordered]@{ phase = "opencode-desktop"; sourceUrl = $url }
-    try {
+    $result = [ordered]@{ phase = "opencode-desktop"; mode = $(if ($locateOnly) { "locate-after-fyagent" } else { "direct-install" }); sourceUrl = $(if ($locateOnly) { $null } else { $url }) }
+    if (-not $locateOnly) { try {
       $resp = Invoke-WebRequest -Uri $url -OutFile $dest -PassThru -UseBasicParsing
       $result.finalUrl = $resp.BaseResponse.RequestMessage.RequestUri.AbsoluteUri
-    } catch { $result.downloadError = "$_" }
-    if (Test-Path $dest) {
+    } catch { $result.downloadError = "$_" } }
+    if ($locateOnly -or (Test-Path $dest)) {
+     if (-not $locateOnly) {
       $result.installerSha256 = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLower()
       $result.installerSize = (Get-Item $dest).Length
       $result.installerSignature = Get-SignatureInfo $dest
@@ -228,6 +243,7 @@ switch ($Phase) {
       Start-Sleep -Seconds 5
       Get-Process | Where-Object { $_.ProcessName -match "^opencode" } | Stop-Process -Force -ErrorAction SilentlyContinue
       $result.uninstallEntriesBefore = $before
+     }
       $result.uninstallEntries = @(Get-UninstallEntries "*OpenCode*")
       $roots = [ordered]@{
         localAppDataPrograms = "$env:LOCALAPPDATA\Programs"
@@ -246,6 +262,7 @@ switch ($Phase) {
               relative = $_.FullName.Substring($root.Length).TrimStart('\').Replace('\', '/')
               versionInfo = Get-FileVersionInfoSafe $_.FullName
               signature = Get-SignatureInfo $_.FullName
+              peMachine = Get-PeMachine $_.FullName
             }
           }
       }
@@ -262,7 +279,7 @@ switch ($Phase) {
       $result.candidateHits = @($found | Where-Object { ($_.root -in @("localAppDataPrograms", "programFiles")) -and ($candidates -contains $_.relative) } | ForEach-Object { $_.path })
       $result.matchesCodeCandidate = $result.candidateHits.Count -gt 0
     }
-    Save-Json "opencode-desktop.json" $result
+    Save-Json $(if ($locateOnly) { "opencode-desktop-e2e.json" } else { "opencode-desktop.json" }) $result
     $result | ConvertTo-Json -Depth 6
   }
 

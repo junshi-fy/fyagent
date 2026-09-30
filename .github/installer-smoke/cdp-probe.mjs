@@ -7,73 +7,14 @@
 // Usage: node cdp-probe.mjs <label>   Env: SMOKE_OUT, SMOKE_CDP_PORT (default 9222)
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { connect, evaluate, findTarget, sleep } from "./cdp-lib.mjs";
 
 const label = process.argv[2] ?? "probe";
 const out = process.env.SMOKE_OUT ?? "smoke-out";
 const port = Number(process.env.SMOKE_CDP_PORT ?? 9222);
 const timeoutMs = Number(process.env.SMOKE_CDP_TIMEOUT_MS ?? 90000);
 mkdirSync(out, { recursive: true });
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const report = { label, startedAt: new Date().toISOString(), port, ok: false };
-
-async function findTarget() {
-  const deadline = Date.now() + timeoutMs;
-  let last = null;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/json/list`);
-      const targets = await res.json();
-      last = targets;
-      const page = targets.find((t) => t.type === "page" && t.webSocketDebuggerUrl);
-      if (page) return { page, targets };
-    } catch (error) {
-      last = String(error);
-    }
-    await sleep(2000);
-  }
-  throw new Error(`no CDP page target within ${timeoutMs} ms: ${JSON.stringify(last)}`);
-}
-
-function connect(url) {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
-    let id = 0;
-    const pending = new Map();
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.id && pending.has(msg.id)) {
-        pending.get(msg.id)(msg);
-        pending.delete(msg.id);
-      }
-    };
-    ws.onerror = (e) => reject(new Error(`websocket error ${e?.message ?? ""}`));
-    ws.onopen = () =>
-      resolve({
-        send(method, params = {}) {
-          id += 1;
-          const msgId = id;
-          ws.send(JSON.stringify({ id: msgId, method, params }));
-          return new Promise((res) => pending.set(msgId, res));
-        },
-        close: () => ws.close(),
-      });
-  });
-}
-
-async function evaluate(cdp, expression) {
-  const res = await cdp.send("Runtime.evaluate", {
-    expression,
-    awaitPromise: true,
-    returnByValue: true,
-    timeout: 120000,
-  });
-  if (res.error) throw new Error(JSON.stringify(res.error));
-  if (res.result?.exceptionDetails) {
-    throw new Error(JSON.stringify(res.result.exceptionDetails).slice(0, 2000));
-  }
-  return res.result?.result?.value;
-}
 
 const AGENT_IDS = ["qoderwork", "trae-work", "workbuddy", "grokbuild", "codex", "claude-code", "opencode"];
 const TOOLS = ["claude", "codex", "gemini", "grok", "opencode", "openclaw", "hermes"];
@@ -110,7 +51,7 @@ const PROBE = `(async () => {
 
 let cdp;
 try {
-  const { page, targets } = await findTarget();
+  const { page, targets } = await findTarget(port, timeoutMs);
   report.targets = targets.map((t) => ({ type: t.type, url: t.url, title: t.title }));
   cdp = await connect(page.webSocketDebuggerUrl);
   await cdp.send("Runtime.enable");
