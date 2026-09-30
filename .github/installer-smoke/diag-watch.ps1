@@ -25,6 +25,47 @@ if ($Mode -eq "churn") {
   while ((Get-Date) -lt $end) { $i++; try { New-Item -ItemType Directory -Force -Path (Join-Path $Dir ("smoke-churn-" + $i)) -ErrorAction Stop | Out-Null } catch { Log $f ([ordered]@{ event = "error"; i = $i; error = "$_" }) }; if ($i % 50 -eq 0) { Log $f ([ordered]@{ event = "count"; i = $i }) }; Start-Sleep -Milliseconds 200 }
   exit 0
 }
+if ($Mode -eq "shellprobe") {
+  # One-shot: replay FyAgent's pre-launch helper steps outside FyAgent to see
+  # which one fails (Explorer desktop ShellWindows route, helper image open).
+  $f = Join-Path $Out "shellprobe.jsonl"
+  Start-Sleep -Seconds 20
+  function Step($name, [scriptblock]$body) { try { $r = & $body; Log $f ([ordered]@{ step = $name; ok = $true; result = "$r" }) } catch { Log $f ([ordered]@{ step = $name; ok = $false; error = "$($_.Exception.GetType().FullName): $($_.Exception.Message)"; hresult = ('0x{0:X8}' -f $_.Exception.HResult) }) } }
+  Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+[ComImport, Guid("85CB6900-4D95-11CF-960C-0080C7F4EE85"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface ISmokeShellWindows {
+  void GetTypeInfoCount(); void GetTypeInfo(); void GetIDsOfNames(); void Invoke();
+  [PreserveSig] int get_Count(out int c);
+  void Item(); void NewEnum(); void Register(); void RegisterPending(); void Revoke(); void OnNavigate(); void OnActivated();
+  [PreserveSig] int FindWindowSW([In] ref object loc, [In] ref object locRoot, int swClass, out int hwnd, int options, [MarshalAs(UnmanagedType.IDispatch)] out object disp);
+}
+public static class SmokeShell {
+  public static object Desktop(out string info) {
+    var t = Type.GetTypeFromCLSID(new Guid("9BA05972-F6A8-11CF-A442-00A0C90A8F39"));
+    object sw = Activator.CreateInstance(t);
+    var raw = (ISmokeShellWindows)sw;
+    int count; int hrc = raw.get_Count(out count);
+    object e1 = null, e2 = null; int hwnd; object disp;
+    int hr = raw.FindWindowSW(ref e1, ref e2, 8, out hwnd, 1, out disp);
+    info = string.Format("count_hr=0x{0:X8} count={1} find_hr=0x{2:X8} hwnd=0x{3:X} disp={4}", hrc, count, hr, hwnd, disp != null);
+    return disp;
+  }
+}
+"@
+  Step "whoami" { (whoami) + " elevated=" + ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
+  Step "explorer" { (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | ForEach-Object { "pid=$($_.ProcessId) session=$($_.SessionId) owner=$((Invoke-CimMethod -InputObject $_ -MethodName GetOwner).User)" }) -join "; " }
+  Step "os" { (Get-CimInstance Win32_OperatingSystem | ForEach-Object { "$($_.Caption) $($_.Version) $($_.OSArchitecture)" }) }
+  $script:desk = $null
+  Step "findwindowsw-desktop" { $i = ""; $script:desk = [SmokeShell]::Desktop([ref]$i); $i }
+  Step "desktop-document" { $d = $script:desk.Document; "doc=" + ($null -ne $d) }
+  Step "desktop-application-shellexecute" { $marker = Join-Path $Out "shellprobe-marker.txt"; $script:desk.Document.Application.ShellExecute("cmd.exe", "/c echo launched-by-explorer > `"$marker`"", "", "", 0); Start-Sleep -Seconds 3; "marker=" + (Test-Path $marker) }
+  $helper = "C:\Program Files\FyAgent\fyagent-user-helper.exe"
+  Step "helper-open-share-read" { $h = [IO.File]::Open($helper, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read); $len = $h.Length; $h.Close(); "len=$len" }
+  Step "helper-pe-machine" { $b = [IO.File]::ReadAllBytes($helper); $pe = [BitConverter]::ToInt32($b, 0x3c); '0x{0:X4}' -f [BitConverter]::ToUInt16($b, $pe + 4) }
+  Step "helper-run-direct" { $p = Start-Process -FilePath $helper -ArgumentList "--version" -PassThru -WindowStyle Hidden; if (-not $p.WaitForExit(10000)) { $p.Kill(); "timeout" } else { "exit=$($p.ExitCode)" } }
+  exit 0
+}
 if ($Mode -eq "bridge") {
   Add-Type -TypeDefinition @"
 using System; using System.Runtime.InteropServices; using Microsoft.Win32.SafeHandles;

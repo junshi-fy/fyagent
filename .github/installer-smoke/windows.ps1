@@ -168,7 +168,7 @@ switch ($Phase) {
       # Diagnostics (hidden, 25 min): helper process trace and package-bridge
       # ancestor identity watch; optional sibling-directory churn.
       $diag = Join-Path $ScriptDir "diag-watch.ps1"
-      $modes = @(@("-Mode", "procs"), @("-Mode", "bridge"))
+      $modes = @(@("-Mode", "procs"), @("-Mode", "bridge"), @("-Mode", "shellprobe"))
       if ($env:SMOKE_E2E_CHURN_DIR) { $modes += , @("-Mode", "churn", "-Dir", "`"$($env:SMOKE_E2E_CHURN_DIR)`"") }
       foreach ($m in $modes) {
         Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -ArgumentList (@("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$diag`"", "-Out", "`"$Out`"") + $m) | Out-Null
