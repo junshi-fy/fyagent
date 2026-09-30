@@ -65,7 +65,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: installer-smoke-${{ inputs.artifact_run_id && format('fork-{0}', inputs.artifact_run_id) || inputs.tag || 'v0.4.9' }}
+  group: installer-smoke-${{ inputs.artifact_run_id && format('fork-{0}-{1}', inputs.artifact_run_id, github.run_id) || inputs.tag || 'v0.4.9' }}
   cancel-in-progress: false
 
 jobs:
