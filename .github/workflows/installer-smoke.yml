@@ -35,6 +35,16 @@ on:
         options:
           - fyagent-e2e
           - npm-preinstall
+      agents:
+        description: "fyagent-e2e only: comma-separated product names to install (empty = all)"
+        required: false
+        default: ""
+        type: string
+      churn_dir:
+        description: "fyagent-e2e Windows only: create sibling directories here while installs run (repro for directory-identity checks), e.g. C:\\ProgramData"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -73,6 +83,8 @@ jobs:
       SMOKE_OUT: ${{ github.workspace }}/smoke-out
       SMOKE_SCENARIO: ${{ inputs.scenario || 'fyagent-e2e' }}
       SMOKE_E2E_WAIT_S: "240"
+      SMOKE_E2E_AGENTS: ${{ inputs.agents || '' }}
+      SMOKE_E2E_CHURN_DIR: ${{ inputs.churn_dir || '' }}
     steps:
       - name: Check out smoke scripts only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -3,14 +3,14 @@
 // each product card press FyAgent's own "一键安装" and "确认安装", then wait and
 // screenshot (webview + desktop) until the card settles.
 // Usage: node cdp-e2e.mjs   Env: SMOKE_OUT, SMOKE_CDP_PORT, SMOKE_E2E_AGENTS, SMOKE_E2E_WAIT_S
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { connect, evaluate, findTarget, sleep } from "./cdp-lib.mjs";
 
 const out = process.env.SMOKE_OUT ?? "smoke-out";
 const port = Number(process.env.SMOKE_CDP_PORT ?? 9222);
-const agents = (process.env.SMOKE_E2E_AGENTS ?? "Claude Code,OpenCode,Grok Build,QoderWork CN,TRAE Work CN,WorkBuddy,Codex").split(",");
+const agents = (process.env.SMOKE_E2E_AGENTS || "Claude Code,OpenCode,Grok Build,QoderWork CN,TRAE Work CN,WorkBuddy,Codex").split(",").map((a) => a.trim()).filter(Boolean);
 const purpose = process.env.SMOKE_E2E_PURPOSE ?? "编程开发";
 const waitS = Number(process.env.SMOKE_E2E_WAIT_S ?? 300);
 mkdirSync(out, { recursive: true });
@@ -117,6 +117,14 @@ try {
   }
   await step("directory", `location.hash = "#/agents"; "ok"`, 10000);
   report.directoryText = await evaluate(cdp, "document.body.innerText.slice(0, 20000)");
+  // Optional repro: keep creating sibling directories under SMOKE_E2E_CHURN_DIR
+  // while installs run (normal Windows activity in e.g. C:\ProgramData).
+  const churnDir = process.env.SMOKE_E2E_CHURN_DIR;
+  if (churnDir) {
+    const script = `$d = '${churnDir.replace(/'/g, "''")}'; $end = (Get-Date).AddMinutes(20); $i = 0; while ((Get-Date) -lt $end) { $i++; New-Item -ItemType Directory -Force -Path (Join-Path $d ("smoke-churn-" + $i)) | Out-Null; Start-Sleep -Milliseconds 200 }`;
+    spawn("powershell", ["-NoProfile", "-Command", script], { detached: true, stdio: "ignore" }).unref();
+    report.churn = { dir: churnDir, startedAt: new Date().toISOString(), everyMs: 200 };
+  }
   report.directoryCards = await evaluate(cdp, CARD_SUMMARY);
   report.readinessAtDirectory = {};
   for (const id of ["claude-code", "grokbuild", "opencode", "codex"]) report.readinessAtDirectory[id] = await evaluate(cdp, INVOKE("get_agent_install_readiness", { agentId: id }));
