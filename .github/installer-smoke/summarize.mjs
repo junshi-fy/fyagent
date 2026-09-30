@@ -142,7 +142,8 @@ if (opencode) {
   md.push("", "## OpenCode Desktop", "");
   md.push(`- 下载：${opencode.finalUrl ?? opencode.sourceUrl}`);
   if (opencode.foundExecutables) {
-    for (const f of opencode.foundExecutables) md.push(`- 找到：\`${f.path}\`（${f.versionInfo?.productName ?? ""} ${f.versionInfo?.productVersion ?? ""}，签名 ${f.signature?.status ?? ""}）`);
+    const seen = new Set();
+    for (const f of opencode.foundExecutables.filter((x) => !seen.has(x.path) && seen.add(x.path))) md.push(`- 找到：\`${f.path}\`（${f.versionInfo?.productName ?? ""} ${f.versionInfo?.productVersion ?? ""}，签名 ${f.signature?.status ?? ""}）`);
     md.push(`- 命中代码候选路径：${yn(opencode.matchesCodeCandidate)}`);
   }
   if (opencode.infoPlist) md.push(`- Bundle：${opencode.infoPlist.CFBundleIdentifier} ${opencode.infoPlist.CFBundleShortVersionString}；与代码一致：${yn(opencode.bundleIdMatchesCode)}`);

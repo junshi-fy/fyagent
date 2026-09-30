@@ -76,6 +76,26 @@ PY
     osascript -e 'tell application "FyAgent" to activate' >/dev/null 2>&1
     sleep 5
     SHOT="$(shot "desktop-$LABEL.png")"
+    # UI walk through the Accessibility tree (WKWebView content is exposed as AX
+    # elements): skip the first-use guide, open agent details and the health page.
+    AXJS="$(dirname "$0")/macos-ax.js"
+    : > "$OUT/ax-walk-$LABEL.log"
+    ax_step() { # <slug> <click-text...>
+      local slug="$1"; shift
+      for t in "$@"; do
+        echo "[$slug] click '$t': $(osascript -l JavaScript "$AXJS" click "$t" 2>&1)" >> "$OUT/ax-walk-$LABEL.log"
+        sleep 4
+      done
+      sleep 4
+      osascript -l JavaScript "$AXJS" dump > "$OUT/ax-text-$LABEL-$slug.txt" 2>&1
+      shot "desktop-$LABEL-$slug.png" >> "$OUT/ax-walk-$LABEL.log"
+    }
+    ax_step skip-guide "跳过引导"
+    ax_step agent-opencode "AI软件配置" "OpenCode"
+    ax_step agent-codex "AI软件配置" "Codex"
+    ax_step agent-claude-code "AI软件配置" "Claude Code"
+    ax_step agent-grokbuild "AI软件配置" "Grok Build"
+    ax_step health "运行状态"
     ALIVE_AFTER=false; kill -0 "$PID" 2>/dev/null && ALIVE_AFTER=true
     osascript -e 'tell application "FyAgent" to quit' >/dev/null 2>&1
     sleep 5

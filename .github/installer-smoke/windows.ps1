@@ -132,6 +132,16 @@ switch ($Phase) {
     $exe = Get-FyAgentExe
     $port = 9222
     $env:SMOKE_CDP_PORT = "$port"
+    # The formal build runs elevated, and elevated WebView2 hosts ignore the
+    # WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS environment variable. Use the
+    # machine-wide WebView2 policy override for this exe name on the throwaway
+    # VM only, and remove it again after the probe.
+    $policyKey = "HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments"
+    New-Item -Path $policyKey -Force | Out-Null
+    $policyNames = @((Split-Path $exe -Leaf), "com.fyagent.desktop")
+    foreach ($n in $policyNames) {
+      New-ItemProperty -Path $policyKey -Name $n -Value "--remote-debugging-port=$port" -PropertyType String -Force | Out-Null
+    }
     $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$port"
     $result = [ordered]@{ phase = "probe"; label = $Label; exe = $exe; startedAt = (Get-Date).ToString("o") }
     $stdout = Join-Path $Out "app-stdout-$Label.log"
@@ -160,6 +170,7 @@ switch ($Phase) {
     }
     Start-Sleep -Seconds 2
     $result.stillRunningAfterQuit = [bool](Get-Process | Where-Object { $_.ProcessName -match "^fyagent" })
+    foreach ($n in $policyNames) { Remove-ItemProperty -Path $policyKey -Name $n -ErrorAction SilentlyContinue }
     $logDir = Join-Path $env:USERPROFILE ".fyagent\logs"
     if (Test-Path $logDir) {
       New-Item -ItemType Directory -Force (Join-Path $Out "fyagent-logs-$Label") | Out-Null
@@ -222,7 +233,7 @@ switch ($Phase) {
         localAppDataPrograms = "$env:LOCALAPPDATA\Programs"
         programFiles         = "$env:ProgramFiles"
         programFilesX86      = "${env:ProgramFiles(x86)}"
-        localAppData         = "$env:LOCALAPPDATA"
+        roamingAppData       = "$env:APPDATA"
       }
       $found = @()
       foreach ($k in $roots.Keys) {

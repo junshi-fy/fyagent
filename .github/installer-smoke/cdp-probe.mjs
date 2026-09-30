@@ -117,15 +117,43 @@ try {
   // Let the renderer finish its own first scan before probing.
   await sleep(Number(process.env.SMOKE_SETTLE_MS ?? 15000));
   report.probe = await evaluate(cdp, PROBE);
-  // Visible agents page: text + webview screenshot.
-  await evaluate(cdp, `location.hash = "#/agents"; true`);
-  await sleep(8000);
-  report.agentsPageText = await evaluate(cdp, `document.body.innerText.slice(0, 20000)`);
-  const shot = await cdp.send("Page.captureScreenshot", { format: "png" });
-  if (shot.result?.data) {
-    writeFileSync(join(out, `webview-${label}.png`), Buffer.from(shot.result.data, "base64"));
-    report.webviewScreenshot = `webview-${label}.png`;
+  // UI walk: same pages a user would open, captured as text + webview PNG.
+  const clickText = (text) => `(() => {
+    const want = ${JSON.stringify(text)};
+    const nodes = [...document.querySelectorAll("button, a, [role=button], [role=tab], [role=link], li, h2, h3, span, div")]
+      .filter((n) => n.offsetParent !== null && (n.innerText || "").trim() === want);
+    const node = nodes.find((n) => n.matches("button, a, [role=button], [role=tab], [role=link]")) ?? nodes[nodes.length - 1];
+    if (!node) return "NOT FOUND";
+    (node.closest("button, a, [role=button], [role=link]") ?? node).click();
+    return "clicked " + node.tagName;
+  })()`;
+  report.ui = [];
+  const capture = async (step, action) => {
+    const entry = { step };
+    try {
+      if (action) entry.action = await evaluate(cdp, action);
+      await sleep(Number(process.env.SMOKE_UI_SETTLE_MS ?? 8000));
+      entry.hash = await evaluate(cdp, "location.hash");
+      entry.text = await evaluate(cdp, "document.body.innerText.slice(0, 20000)");
+      const shot = await cdp.send("Page.captureScreenshot", { format: "png" });
+      if (shot.result?.data) {
+        entry.screenshot = `webview-${label}-${step}.png`;
+        writeFileSync(join(out, entry.screenshot), Buffer.from(shot.result.data, "base64"));
+      }
+    } catch (error) {
+      entry.error = String(error);
+    }
+    report.ui.push(entry);
+  };
+  await capture("start");
+  await capture("skip-guide", clickText("跳过引导"));
+  for (const [slug, name] of [["opencode", "OpenCode"], ["codex", "Codex"], ["claude-code", "Claude Code"], ["grokbuild", "Grok Build"]]) {
+    await evaluate(cdp, `location.hash = "#/agents"; true`);
+    await sleep(3000);
+    await capture(`agent-${slug}`, clickText(name));
   }
+  await capture("health", `location.hash = "#/health"; "hash set"`);
+  report.agentsPageText = report.ui.find((u) => u.step === "skip-guide")?.text ?? null;
   report.ok = report.probe?.tauri === true;
 } catch (error) {
   report.error = String(error?.stack ?? error);
