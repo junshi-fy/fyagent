@@ -16,6 +16,8 @@ const load = (name) => {
 };
 
 const sha = load("sha-check.json");
+const buildSource = load("build-source.json");
+const explorerPrep = load("explorer-prep.json");
 const install = load("install.json");
 const npmLatest = load("npm-latest.json");
 const tools = load("tools-install.json");
@@ -89,6 +91,8 @@ const summary = {
   generatedAt: new Date().toISOString(),
   tag: sha?.tag,
   sha,
+  buildSource,
+  explorerPrep,
   install: install
     ? {
         ok: install.ok,
@@ -120,6 +124,11 @@ writeFileSync(join(out, "summary.json"), JSON.stringify(summary, null, 2));
 const yn = (v) => (v === true ? "是" : v === false ? "否" : "—");
 const md = [];
 md.push(`# ${id} 安装冒烟（虚拟机实测，GitHub-hosted VM）— 场景 ${scenario}`, "");
+if (buildSource) {
+  md.push(`> **非 release 构建**：fork 构建 run ${buildSource.runId}（${buildSource.repo}），源分支 \`${buildSource.ref}\` @ \`${buildSource.sourceSha}\`，未签名；下面的安装包 SHA-256 取自 fork 构建产物本身，与正式 Release 无关。`, "");
+  md.push(`- 安装包：\`${buildSource.asset}\` sha256=\`${buildSource.sha256}\``, "");
+}
+if (explorerPrep) md.push(`- Explorer 预处理：before=${explorerPrep.before ?? "—"}；restarted=${explorerPrep.restarted}；after=${explorerPrep.after ?? "—"}`, "");
 md.push(`- Tag：${sha?.tag ?? "?"}；manifest sourceSha：${sha?.manifestSourceSha ?? "?"}；生成时间（UTC）：${summary.generatedAt}`, "");
 md.push("## SHA-256（本 runner 实算 vs 官方 manifest）", "", "| 文件 | 本机实算 | manifest | 一致 | provenance 一致 |", "| --- | --- | --- | --- | --- |");
 for (const c of sha?.checks ?? []) md.push(`| ${c.name} | \`${c.actualSha256}\` | \`${c.manifestSha256}\` | ${yn(c.shaMatch && c.sizeMatch)} | ${yn(c.provenanceMatch)} |`);

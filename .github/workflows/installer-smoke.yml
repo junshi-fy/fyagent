@@ -45,12 +45,27 @@ on:
         required: false
         default: ""
         type: string
+      artifact_run_id:
+        description: "Optional: install the unsigned fork build from this fork-build.yml run id instead of the release assets (summary is marked non-release)"
+        required: false
+        default: ""
+        type: string
+      restart_explorer:
+        description: "Windows only: restart explorer.exe before FyAgent starts if the desktop shell view is missing (test-environment preparation)"
+        required: false
+        default: "none"
+        type: choice
+        options:
+          - none
+          - arm64
+          - all
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: installer-smoke-${{ inputs.tag || 'v0.4.9' }}
+  group: installer-smoke-${{ inputs.artifact_run_id && format('fork-{0}', inputs.artifact_run_id) || inputs.tag || 'v0.4.9' }}
   cancel-in-progress: false
 
 jobs:
@@ -103,21 +118,60 @@ jobs:
 
       - name: Download official release assets and verify SHA-256
         id: fetch
+        if: inputs.artifact_run_id == ''
         shell: bash
         run: node .github/installer-smoke/fetch-verify.mjs
+
+      - name: Download fork build artifact (NON-RELEASE)
+        if: inputs.artifact_run_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: fork-build-${{ matrix.id }}
+          path: ${{ github.workspace }}/smoke-out/assets
+          run-id: ${{ inputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Locate fork build asset (NON-RELEASE)
+        id: forkasset
+        if: inputs.artifact_run_id != ''
+        shell: bash
+        env:
+          FORK_RUN_ID: ${{ inputs.artifact_run_id }}
+        run: |
+          set -euo pipefail
+          cd "$SMOKE_OUT/assets"
+          if [ "$SMOKE_PLATFORM" = windows ]; then asset=$(ls *.exe); else asset=$(ls *.dmg); fi
+          [ "$(printf '%s\n' "$asset" | wc -l)" -eq 1 ]
+          node -e '
+            const fs = require("fs"), crypto = require("crypto");
+            const info = JSON.parse(fs.readFileSync("build-info.json", "utf8").replace(/^\uFEFF/, ""));
+            const asset = process.argv[1];
+            const sha256 = crypto.createHash("sha256").update(fs.readFileSync(asset)).digest("hex");
+            if (info.sha256 !== sha256) throw new Error(`sha mismatch vs build-info: ${info.sha256} != ${sha256}`);
+            const out = { nonRelease: true, runId: process.env.FORK_RUN_ID, repo: info.repo, ref: info.ref, sourceSha: info.sourceSha, asset, sha256 };
+            fs.writeFileSync(process.env.SMOKE_OUT + "/build-source.json", JSON.stringify(out, null, 2));
+            console.log(JSON.stringify(out, null, 2));
+          ' "$asset"
+          echo "asset=$SMOKE_OUT/assets/$asset" >> "$GITHUB_OUTPUT"
 
       - name: Install FyAgent (Windows, NSIS /S)
         if: matrix.platform == 'windows'
         shell: pwsh
         env:
-          SMOKE_ASSET: ${{ steps.fetch.outputs.asset }}
+          SMOKE_ASSET: ${{ steps.fetch.outputs.asset || steps.forkasset.outputs.asset }}
         run: ./.github/installer-smoke/windows.ps1 -Phase install
+
+      - name: Prepare Explorer desktop view (test environment)
+        if: matrix.platform == 'windows' && (inputs.restart_explorer == 'all' || (inputs.restart_explorer == 'arm64' && matrix.arch == 'arm64'))
+        continue-on-error: true
+        shell: pwsh
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .github/installer-smoke/diag-watch.ps1 -Mode explorerprep -Out "$env:SMOKE_OUT" -Dir restart
 
       - name: Install FyAgent (macOS, dmg copy)
         if: matrix.platform == 'macos'
         shell: bash
         env:
-          SMOKE_ASSET: ${{ steps.fetch.outputs.asset }}
+          SMOKE_ASSET: ${{ steps.fetch.outputs.asset || steps.forkasset.outputs.asset }}
         run: ./.github/installer-smoke/macos.sh install
 
       - name: "E2E: onboarding and one-click installs through FyAgent UI"
@@ -189,7 +243,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: installer-smoke-${{ inputs.tag || 'v0.4.9' }}-${{ inputs.scenario || 'fyagent-e2e' }}-${{ matrix.id }}
+          name: installer-smoke-${{ inputs.artifact_run_id && format('fork-{0}', inputs.artifact_run_id) || inputs.tag || 'v0.4.9' }}-${{ inputs.scenario || 'fyagent-e2e' }}-${{ matrix.id }}${{ github.run_attempt > 1 && format('-a{0}', github.run_attempt) || '' }}
           path: |
             smoke-out
             !smoke-out/assets/*.exe

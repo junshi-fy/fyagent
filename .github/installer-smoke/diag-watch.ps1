@@ -5,32 +5,15 @@
 #                 every 50 ms and log each change.
 #  -Mode procs  : log every helper / node / npm / installer process seen.
 #  -Mode churn  : create a sibling directory under -Dir every 200 ms.
+#  -Mode explorerprep : synchronous; probe the Explorer desktop view that
+#                 FyAgent's helper launch uses and, with -Dir restart, restart
+#                 explorer.exe until FindWindowSW(SWC_DESKTOP) returns S_OK.
+#                 Test-environment preparation only; writes explorer-prep.json.
 param([string]$Mode, [string]$Out, [string]$Dir = "")
 $ErrorActionPreference = "Continue"
 $end = (Get-Date).AddMinutes(25)
 function Log($file, $obj) { $obj["at"] = (Get-Date).ToUniversalTime().ToString("o"); ($obj | ConvertTo-Json -Compress) | Add-Content -Encoding utf8 -Path $file }
-if ($Mode -eq "procs") {
-  $f = Join-Path $Out "proc-trace.jsonl"; Log $f ([ordered]@{ event = "started" })
-  $seen = @{}
-  while ((Get-Date) -lt $end) {
-    Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'fyagent-user-helper|node|npm|claude|grok|AppInstaller|msiexec|Setup|codex' } | ForEach-Object {
-      if (-not $seen.ContainsKey($_.ProcessId)) { $seen[$_.ProcessId] = 1; Log $f ([ordered]@{ event = "seen"; pid = $_.ProcessId; ppid = $_.ParentProcessId; name = $_.Name; cmd = $_.CommandLine; path = $_.ExecutablePath; session = $_.SessionId }) }
-    }
-    Start-Sleep -Milliseconds 300
-  }
-  exit 0
-}
-if ($Mode -eq "churn") {
-  $f = Join-Path $Out "churn.jsonl"; Log $f ([ordered]@{ event = "started"; dir = $Dir }); $i = 0
-  while ((Get-Date) -lt $end) { $i++; try { New-Item -ItemType Directory -Force -Path (Join-Path $Dir ("smoke-churn-" + $i)) -ErrorAction Stop | Out-Null } catch { Log $f ([ordered]@{ event = "error"; i = $i; error = "$_" }) }; if ($i % 50 -eq 0) { Log $f ([ordered]@{ event = "count"; i = $i }) }; Start-Sleep -Milliseconds 200 }
-  exit 0
-}
-if ($Mode -eq "shellprobe") {
-  # One-shot: replay FyAgent's pre-launch helper steps outside FyAgent to see
-  # which one fails (Explorer desktop ShellWindows route, helper image open).
-  $f = Join-Path $Out "shellprobe.jsonl"
-  Start-Sleep -Seconds 20
-  function Step($name, [scriptblock]$body) { try { $r = & $body; Log $f ([ordered]@{ step = $name; ok = $true; result = "$r" }) } catch { Log $f ([ordered]@{ step = $name; ok = $false; error = "$($_.Exception.GetType().FullName): $($_.Exception.Message)"; hresult = ('0x{0:X8}' -f $_.Exception.HResult) }) } }
+function Add-SmokeShell {
   Add-Type -TypeDefinition @"
 using System; using System.Runtime.InteropServices;
 [ComImport, Guid("85CB6900-4D95-11CF-960C-0080C7F4EE85"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -53,6 +36,52 @@ public static class SmokeShell {
   }
 }
 "@
+}
+if ($Mode -eq "procs") {
+  $f = Join-Path $Out "proc-trace.jsonl"; Log $f ([ordered]@{ event = "started" })
+  $seen = @{}
+  while ((Get-Date) -lt $end) {
+    Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'fyagent-user-helper|node|npm|claude|grok|AppInstaller|msiexec|Setup|codex' } | ForEach-Object {
+      if (-not $seen.ContainsKey($_.ProcessId)) { $seen[$_.ProcessId] = 1; Log $f ([ordered]@{ event = "seen"; pid = $_.ProcessId; ppid = $_.ParentProcessId; name = $_.Name; cmd = $_.CommandLine; path = $_.ExecutablePath; session = $_.SessionId }) }
+    }
+    Start-Sleep -Milliseconds 300
+  }
+  exit 0
+}
+if ($Mode -eq "churn") {
+  $f = Join-Path $Out "churn.jsonl"; Log $f ([ordered]@{ event = "started"; dir = $Dir }); $i = 0
+  while ((Get-Date) -lt $end) { $i++; try { New-Item -ItemType Directory -Force -Path (Join-Path $Dir ("smoke-churn-" + $i)) -ErrorAction Stop | Out-Null } catch { Log $f ([ordered]@{ event = "error"; i = $i; error = "$_" }) }; if ($i % 50 -eq 0) { Log $f ([ordered]@{ event = "count"; i = $i }) }; Start-Sleep -Milliseconds 200 }
+  exit 0
+}
+if ($Mode -eq "explorerprep") {
+  Add-SmokeShell
+  function Probe { $i = ""; try { $null = [SmokeShell]::Desktop([ref]$i) } catch { $i = "error=$($_.Exception.Message)" }; $i }
+  $before = Probe
+  $res = [ordered]@{ before = $before; restarted = $false; after = $null; attempts = @() }
+  if ($Dir -eq "restart" -and $before -notmatch "find_hr=0x00000000") {
+    $res.restarted = $true
+    Get-Process explorer -ErrorAction SilentlyContinue | Stop-Process -Force
+    Start-Sleep -Seconds 5
+    if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
+    for ($k = 0; $k -lt 20; $k++) {
+      Start-Sleep -Seconds 3
+      $now = Probe; $res.attempts += $now
+      if ($now -match "find_hr=0x00000000") { break }
+    }
+  }
+  $res.after = Probe
+  $res.explorer = (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | ForEach-Object { "pid=$($_.ProcessId) session=$($_.SessionId)" }) -join "; "
+  ($res | ConvertTo-Json -Depth 4) | Set-Content -Encoding utf8 -Path (Join-Path $Out "explorer-prep.json")
+  $res | ConvertTo-Json -Depth 4
+  exit 0
+}
+if ($Mode -eq "shellprobe") {
+  # One-shot: replay FyAgent's pre-launch helper steps outside FyAgent to see
+  # which one fails (Explorer desktop ShellWindows route, helper image open).
+  $f = Join-Path $Out "shellprobe.jsonl"
+  Start-Sleep -Seconds 20
+  function Step($name, [scriptblock]$body) { try { $r = & $body; Log $f ([ordered]@{ step = $name; ok = $true; result = "$r" }) } catch { Log $f ([ordered]@{ step = $name; ok = $false; error = "$($_.Exception.GetType().FullName): $($_.Exception.Message)"; hresult = ('0x{0:X8}' -f $_.Exception.HResult) }) } }
+  Add-SmokeShell
   Step "whoami" { (whoami) + " elevated=" + ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
   Step "explorer" { (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | ForEach-Object { "pid=$($_.ProcessId) session=$($_.SessionId) owner=$((Invoke-CimMethod -InputObject $_ -MethodName GetOwner).User)" }) -join "; " }
   Step "os" { (Get-CimInstance Win32_OperatingSystem | ForEach-Object { "$($_.Caption) $($_.Version) $($_.OSArchitecture)" }) }
