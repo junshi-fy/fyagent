@@ -1,0 +1,156 @@
+# Installer smoke test on throwaway GitHub-hosted VMs (fork-only, manual).
+# Installs ONLY the already-published release assets of the given tag after
+# verifying SHA-256 against the official download-manifest.json. Nothing is
+# built or repackaged here. Results are "virtual machine" evidence, not
+# real-device acceptance: runners are admin with UAC/SmartScreen UI not
+# observable.
+name: Installer Smoke (VM)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: FyAgent release tag to test (vX.Y.Z)
+        required: true
+        default: v0.4.9
+        type: string
+      source_repo:
+        description: Repository that published the release
+        required: true
+        default: fy-agent/fyagent
+        type: string
+      install_agent_tools:
+        description: Install agent CLIs / OpenCode Desktop and re-run detection
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-smoke-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: ${{ matrix.id }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: windows-x64
+            runner: windows-2025
+            platform: windows
+            arch: x64
+          - id: windows-arm64
+            runner: windows-11-vs2026-arm
+            platform: windows
+            arch: arm64
+          - id: macos-arm64
+            runner: macos-latest
+            platform: macos
+            arch: universal
+    env:
+      SMOKE_ID: ${{ matrix.id }}
+      SMOKE_TAG: ${{ inputs.tag }}
+      SMOKE_REPO: ${{ inputs.source_repo }}
+      SMOKE_PLATFORM: ${{ matrix.platform }}
+      SMOKE_ARCH: ${{ matrix.arch }}
+      SMOKE_OUT: ${{ github.workspace }}/smoke-out
+    steps:
+      - name: Check out smoke scripts only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/installer-smoke
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Read npm latest versions (live)
+        shell: bash
+        run: node .github/installer-smoke/npm-latest.mjs
+
+      - name: Download official release assets and verify SHA-256
+        id: fetch
+        shell: bash
+        run: node .github/installer-smoke/fetch-verify.mjs
+
+      - name: Install FyAgent (Windows, NSIS /S)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          SMOKE_ASSET: ${{ steps.fetch.outputs.asset }}
+        run: ./.github/installer-smoke/windows.ps1 -Phase install
+
+      - name: Install FyAgent (macOS, dmg copy)
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          SMOKE_ASSET: ${{ steps.fetch.outputs.asset }}
+        run: ./.github/installer-smoke/macos.sh install
+
+      - name: Launch and detect (baseline)
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$SMOKE_PLATFORM" = windows ]; then
+            pwsh -File .github/installer-smoke/windows.ps1 -Phase probe -Label baseline
+          else
+            ./.github/installer-smoke/macos.sh probe baseline
+          fi
+
+      - name: Install agent CLIs via npm
+        if: inputs.install_agent_tools
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$SMOKE_PLATFORM" = windows ]; then
+            pwsh -File .github/installer-smoke/windows.ps1 -Phase tools
+          else
+            ./.github/installer-smoke/macos.sh tools
+          fi
+
+      - name: Install OpenCode Desktop (official stable installer)
+        if: inputs.install_agent_tools
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$SMOKE_PLATFORM" = windows ]; then
+            pwsh -File .github/installer-smoke/windows.ps1 -Phase opencode-desktop
+          else
+            ./.github/installer-smoke/macos.sh opencode-desktop
+          fi
+
+      - name: Launch and detect (after tools)
+        if: inputs.install_agent_tools
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$SMOKE_PLATFORM" = windows ]; then
+            pwsh -File .github/installer-smoke/windows.ps1 -Phase probe -Label after-tools
+          else
+            ./.github/installer-smoke/macos.sh probe after-tools
+          fi
+
+      - name: Summarize
+        if: always()
+        shell: bash
+        run: node .github/installer-smoke/summarize.mjs
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-smoke-${{ inputs.tag }}-${{ matrix.id }}
+          path: |
+            smoke-out
+            !smoke-out/assets/*.exe
+            !smoke-out/assets/*.dmg
+          if-no-files-found: warn
+          retention-days: 30
