@@ -122,7 +122,7 @@ PY
     EXE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exe"])' "$OUT/install.json")"
     AXJS="$(dirname "$0")/macos-ax.js"
     WAIT_S="${SMOKE_E2E_WAIT_S:-300}"
-    IFS=',' read -r -a AGENTS <<< "${SMOKE_E2E_AGENTS:-Claude Code,OpenCode,Codex,Grok Build,QoderWork CN,TRAE Work CN,WorkBuddy}"
+    IFS=',' read -r -a AGENTS <<< "${SMOKE_E2E_AGENTS:-Claude Code,OpenCode,Grok Build,QoderWork CN,TRAE Work CN,WorkBuddy,Codex}"
     LOG="$OUT/e2e-walk.log"; : > "$LOG"
     N=0
     snap() { # <name>
@@ -137,7 +137,7 @@ PY
     osascript -e 'tell application "FyAgent" to activate' >/dev/null 2>&1
     sleep 3
     snap first-run
-    ax click "编程开发" >/dev/null; sleep 5; snap pick-coding
+    ax click "${SMOKE_E2E_PURPOSE:-编程开发}" >/dev/null; sleep 5; snap pick-coding
     R="$(ax click "查看全部软件")"; sleep 5
     case "$R" in clicked*) ;; *) ax click "跳过引导" >/dev/null; sleep 5 ;; esac
     snap directory

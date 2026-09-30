@@ -10,10 +10,11 @@ import { connect, evaluate, findTarget, sleep } from "./cdp-lib.mjs";
 
 const out = process.env.SMOKE_OUT ?? "smoke-out";
 const port = Number(process.env.SMOKE_CDP_PORT ?? 9222);
-const agents = (process.env.SMOKE_E2E_AGENTS ?? "Claude Code,OpenCode,Codex,Grok Build,QoderWork CN,TRAE Work CN,WorkBuddy").split(",");
+const agents = (process.env.SMOKE_E2E_AGENTS ?? "Claude Code,OpenCode,Grok Build,QoderWork CN,TRAE Work CN,WorkBuddy,Codex").split(",");
+const purpose = process.env.SMOKE_E2E_PURPOSE ?? "编程开发";
 const waitS = Number(process.env.SMOKE_E2E_WAIT_S ?? 300);
 mkdirSync(out, { recursive: true });
-const report = { scenario: "fyagent-e2e", startedAt: new Date().toISOString(), steps: [] };
+const report = { scenario: "fyagent-e2e", startedAt: new Date().toISOString(), steps: [], products: [] };
 let n = 0;
 
 function desktopShot(name) {
@@ -31,46 +32,46 @@ function desktopShot(name) {
   }
 }
 
+// Match a visible, enabled button by exact text, first line, or aria-label
+// (the onboarding choices render "编程开发\n写代码、修问题与测试").
 const CLICK_TEXT = (text) => `(() => {
   const want = ${JSON.stringify(text)};
   const vis = (n) => n.offsetParent !== null || n.getClientRects().length > 0;
-  const nodes = [...document.querySelectorAll("button, a, [role=button]")].filter((n) => vis(n) && (n.innerText || n.getAttribute("aria-label") || "").trim() === want && !n.disabled);
+  const label = (n) => { const t = (n.innerText || "").trim(); return [t, t.split("\\n")[0].trim(), (n.getAttribute("aria-label") || "").trim()]; };
+  const nodes = [...document.querySelectorAll("button, a, [role=button]")].filter((n) => vis(n) && !n.disabled && label(n).includes(want));
   if (!nodes.length) return "NOT FOUND";
   nodes[nodes.length - 1].click();
   return "clicked";
 })()`;
 
-// Click the button labelled `button` inside the smallest container that also
-// contains the product heading `name`.
+// The product card is the <article> that owns the exact <h2> heading
+// (AgentDirectory.tsx). Only buttons inside that card are eligible.
+const CARD = (name) => `[...document.querySelectorAll("article h2")].filter((h) => (h.innerText || "").trim() === ${JSON.stringify(name)}).map((h) => h.closest("article"))[0] || null`;
+
 const CLICK_IN_CARD = (name, button) => `(() => {
-  const vis = (n) => n.offsetParent !== null || n.getClientRects().length > 0;
-  const buttons = [...document.querySelectorAll("button")].filter((b) => vis(b) && (b.innerText || "").trim() === ${JSON.stringify(button)});
-  let best = null;
-  for (const b of buttons) {
-    let a = b.parentElement;
-    for (let i = 0; a && i < 10; i += 1, a = a.parentElement) {
-      const heads = [...a.querySelectorAll("h2, h3, h4, strong, [class*=title], [class*=name]")].map((h) => (h.innerText || "").trim());
-      if (heads.includes(${JSON.stringify(name)})) {
-        const len = (a.innerText || "").length;
-        if (!best || len < best.len) best = { b, len, disabled: b.disabled };
-        break;
-      }
-    }
-  }
-  if (!best) return "NOT FOUND";
-  if (best.disabled) return "DISABLED";
-  best.b.scrollIntoView({ block: "center" });
-  best.b.click();
+  const card = ${CARD(name)};
+  if (!card) return "NO CARD";
+  const buttons = [...card.querySelectorAll("button")];
+  const b = buttons.find((x) => (x.innerText || "").trim() === ${JSON.stringify(button)});
+  if (!b) return "NO BUTTON (card buttons: " + buttons.map((x) => (x.innerText || "").trim()).join(" / ") + ")";
+  if (b.disabled) return "DISABLED";
+  b.scrollIntoView({ block: "center" });
+  b.click();
   return "clicked";
 })()`;
 
-const CARD_TEXT = (name) => `(() => {
-  const heads = [...document.querySelectorAll("h2, h3, h4")].filter((h) => (h.innerText || "").trim() === ${JSON.stringify(name)});
-  if (!heads.length) return null;
-  let a = heads[0];
-  for (let i = 0; i < 6 && a.parentElement; i += 1) { a = a.parentElement; if ((a.innerText || "").length > 60) break; }
-  return (a.innerText || "").slice(0, 1500);
-})()`;
+const CARD_TEXT = (name) => `(() => { const c = ${CARD(name)}; return c ? (c.innerText || "").slice(0, 1500) : null; })()`;
+const CARD_BUSY = (name) => `(() => { const c = ${CARD(name)}; return !!(c && c.querySelector(".fy-agent-directory-lifecycle-status, [role=status]")); })()`;
+const ANY_BUSY = `document.querySelectorAll(".fy-agent-directory-lifecycle-status").length`;
+const CARD_SUMMARY = `[...document.querySelectorAll("article h2")].map((h) => { const c = h.closest("article"); return { name: (h.innerText || "").trim(), buttons: [...c.querySelectorAll("button")].map((x) => (x.innerText || "").trim()), text: (c.innerText || "").slice(0, 400) }; })`;
+const INVOKE = (cmd, args) => `(async () => { try { return { ok: true, value: await window.__TAURI_INTERNALS__.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(args ?? {})}) }; } catch (e) { return { ok: false, error: typeof e === "string" ? e : JSON.stringify(e) }; } })()`;
+
+async function rescan() {
+  await evaluate(cdp, `location.hash = "#/agents"; true`);
+  await sleep(3000);
+  await evaluate(cdp, CLICK_TEXT("重新扫描"));
+  await sleep(8000);
+}
 
 let cdp;
 async function step(name, action, settleMs = 6000) {
@@ -103,23 +104,33 @@ try {
   await cdp.send("Runtime.enable");
   await sleep(15000);
   await step("first-run", null, 1000);
-  await step("pick-coding", CLICK_TEXT("编程开发"));
+  report.firstRunText = await evaluate(cdp, "document.body.innerText.slice(0, 4000)");
+  const pick = await step("pick-coding", CLICK_TEXT(purpose));
+  report.purpose = purpose;
+  report.purposeClick = pick.action;
+  report.recommendationText = await evaluate(cdp, "document.body.innerText.slice(0, 6000)");
   const all = await step("view-all", CLICK_TEXT("查看全部软件"));
-  if (all.action !== "clicked") await step("skip-guide", CLICK_TEXT("跳过引导"));
-  await step("directory", `location.hash = "#/agents"; "ok"`);
+  report.guideCompletedVia = all.action === "clicked" ? "查看全部软件" : null;
+  if (all.action !== "clicked") {
+    const skip = await step("skip-guide", CLICK_TEXT("跳过引导"));
+    report.guideCompletedVia = skip.action === "clicked" ? "跳过引导 (fallback)" : "none";
+  }
+  await step("directory", `location.hash = "#/agents"; "ok"`, 10000);
   report.directoryText = await evaluate(cdp, "document.body.innerText.slice(0, 20000)");
+  report.directoryCards = await evaluate(cdp, CARD_SUMMARY);
 
   for (const name of agents) {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     const product = { name, startedAt: new Date().toISOString() };
-    await evaluate(cdp, `location.hash = "#/agents"; true`);
-    await sleep(3000);
+    // Never start a product while another card still shows a running job.
+    for (let k = 0; k < 20 && (await evaluate(cdp, ANY_BUSY)); k += 1) await sleep(15000);
+    await rescan();
     product.before = await evaluate(cdp, CARD_TEXT(name));
     const s1 = await step(`${slug}-oneclick`, CLICK_IN_CARD(name, "一键安装"));
     product.oneClick = s1.action;
     if (s1.action !== "clicked") {
-      product.result = `一键安装 ${s1.action}`;
-      report.products = [...(report.products ?? []), product];
+      product.result = `未提供一键安装：${s1.action}`;
+      report.products.push(product);
       continue;
     }
     product.confirmationDialog = s1.dialog ?? null;
@@ -131,24 +142,30 @@ try {
     let last = null;
     let i = 0;
     while (Date.now() < deadline) {
-      await sleep(30000);
+      await sleep(20000);
       i += 1;
       last = await evaluate(cdp, CARD_TEXT(name));
+      const busy = await evaluate(cdp, CARD_BUSY(name));
       const dialogOpen = await evaluate(cdp, `document.querySelectorAll("[role=dialog], [role=alertdialog]").length`);
-      if (i % 2 === 0) await step(`${slug}-wait${i}`, null, 500);
-      if (last && !/正在|安装中|下载中|准备|检查中|等待/.test(last) && !dialogOpen) break;
+      if (i % 3 === 0) await step(`${slug}-wait${i}`, null, 500);
+      if (!busy && !dialogOpen && last && !/正在/.test(last)) break;
     }
     const s3 = await step(`${slug}-settled`, null, 2000);
     product.after = last;
     product.afterDialog = s3.dialog ?? null;
+    if (name === "Codex") product.codexJob = await evaluate(cdp, INVOKE("codex_desktop_get_job"));
     product.finishedAt = new Date().toISOString();
-    report.products = [...(report.products ?? []), product];
+    report.products.push(product);
     // Close any lingering dialog before the next product.
     await evaluate(cdp, CLICK_TEXT("关闭"));
     await evaluate(cdp, CLICK_TEXT("取消"));
   }
-  await step("rescan", `location.hash = "#/agents"; setTimeout(() => { const b = [...document.querySelectorAll("button")].find((x) => x.innerText.trim() === "重新扫描"); b && b.click(); }, 500); "ok"`, 20000);
+  await rescan();
+  await step("rescan", null, 12000);
   report.finalDirectoryText = await evaluate(cdp, "document.body.innerText.slice(0, 20000)");
+  report.finalCards = await evaluate(cdp, CARD_SUMMARY);
+  report.codexJobFinal = await evaluate(cdp, INVOKE("codex_desktop_get_job"));
+  report.codexLocalStatus = await evaluate(cdp, INVOKE("codex_desktop_get_local_status"));
   report.ok = true;
 } catch (error) {
   report.error = String(error?.stack ?? error);

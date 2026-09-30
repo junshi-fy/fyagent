@@ -159,7 +159,11 @@ if (opencode) {
 if (e2e) {
   md.push("", "## 端到端：通过 FyAgent 自身按钮安装", "", `- 驱动结果：${e2e.ok ? "完成" : "中断"} ${e2e.error ? "(" + String(e2e.error).split("\n")[0] + ")" : ""}`);
   md.push("", "| 产品 | 一键安装 | 确认安装 | 结束时卡片文字 |", "| --- | --- | --- | --- |");
-  for (const p of e2e.products ?? []) md.push(`| ${p.name} | ${p.oneClick ?? "—"} | ${p.confirm ?? "—"} | ${String(p.after ?? p.result ?? "").replace(/\s+/g, " ").slice(0, 160)} |`);
+  for (const p of e2e.products ?? []) md.push(`| ${p.name} | ${String(p.oneClick ?? "—").replace(/\|/g, "/")} | ${p.confirm ?? "—"} | ${String(p.after ?? p.result ?? "").replace(/\s+/g, " ").replace(/\|/g, "/").slice(0, 160)} |`);
+  md.push("", `- 引导：用途「${e2e.purpose ?? "—"}」点击结果 ${e2e.purposeClick ?? "—"}；完成方式 ${e2e.guideCompletedVia ?? "—"}`);
+  if (e2e.directoryCards) md.push("- 目录页各卡片提供的按钮：" + e2e.directoryCards.map((c) => `${c.name}[${c.buttons.join("/")}]`).join("；"));
+  const job = (e2e.products ?? []).find((p) => p.codexJob)?.codexJob ?? e2e.codexJobFinal;
+  if (job) md.push("- Codex Desktop 任务快照（codex_desktop_get_job）：`" + JSON.stringify(job).slice(0, 600) + "`");
 }
 if (existsSync(join(out, "e2e-walk.log"))) md.push("", "## 端到端（macOS AX 驱动日志）", "", "```", readFileSync(join(out, "e2e-walk.log"), "utf8").slice(0, 6000), "```");
 if (opencodeE2e) {
@@ -173,7 +177,7 @@ if (cliAfter) {
   for (const t of cliAfter.tools ?? []) md.push(`| ${t.bin} | ${t.where ?? "—"} | ${t.version ?? "—"} | ${(t.extra ?? []).map((x) => x.path + " " + (x.version ?? "")).join("; ")} |`);
   for (const a of cliAfter.apps ?? []) md.push(`- App：${a.path} ${a.bundleId ?? ""} ${a.version ?? ""}`);
 }
-md.push("", "## 限制", "", "- 这是 GitHub-hosted 虚拟机实测，不等于真机通过。", "- runner 以管理员身份运行，UAC 提示和 SmartScreen 界面不可观察；#68 验收中的 SmartScreen 警告和 UAC 提示不在覆盖范围内。", "- 未覆盖中国大陆网络环境和 npm 镜像路径（npmmirror 等）；runner 位于境外，直连 npmjs。npmmirror 目前仍把 Grok latest 标成 0.1.4（官方 1.0.44），FyAgent 没有让用户选择镜像的设置，本次未强制镜像场景。", "- Windows ARM64：npm-preinstall 场景直接装的是 OpenCode 官方 win-x64 安装包（仿真运行），不代表 ARM 用户；FyAgent 自身下载哪个构建以端到端场景的记录为准。");
+md.push("", "## 限制", "", "- 这是 GitHub-hosted 虚拟机实测，不等于真机通过。", "- runner 以管理员身份运行，UAC 提示和 SmartScreen 界面不可观察；#68 验收中的 SmartScreen 警告和 UAC 提示不在覆盖范围内。", "- 未覆盖中国大陆网络环境和 npm 镜像路径（npmmirror 等）；runner 位于境外，直连 npmjs。npmmirror 目前仍把 Grok latest 标成 0.1.4（官方 1.0.44），FyAgent 没有让用户选择镜像的设置，本次未强制镜像场景。", "- Windows ARM64：npm-preinstall 场景由测试脚本直接装 OpenCode 官方 win-x64 安装包（仿真运行），不代表 ARM 用户（官方另有 win-arm64 构建）。FyAgent v0.4.9 自身在 Windows ARM64 上对 OpenCode Desktop 返回 PlatformUnsupported（agent_install/sources/opencode.rs），不提供一键安装，既不下载 win-arm64 也不下载 win-x64；Windows x64 上下载 stable/windows-x64-nsis。");
 writeFileSync(join(out, "summary.md"), md.join("\n") + "\n");
 if (process.env.GITHUB_STEP_SUMMARY) writeFileSync(process.env.GITHUB_STEP_SUMMARY, md.join("\n") + "\n", { flag: "a" });
 console.log(md.join("\n"));

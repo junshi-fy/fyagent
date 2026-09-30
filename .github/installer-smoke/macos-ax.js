@@ -43,10 +43,15 @@ function run(argv) {
       const role = get(el, "role");
       const texts = [get(el, "name"), get(el, "description"), get(el, "title"), get(el, "value")];
       const clickable = role === "AXButton" || role === "AXLink" || role === "AXMenuItem";
+      // Onboarding choices expose "编程开发 写代码、修问题与测试" as one label.
+      const matches = (want) => texts.some((t) => t === want || t.startsWith(`${want} `));
       if (mode === "click") {
-        if (clickable && texts.includes(a1)) return press(el, role, a1);
+        if (clickable && matches(a1)) return press(el, role, a1);
       } else if (mode === "clickafter") {
-        if (!seenAnchor && texts.includes(a1)) seenAnchor = true;
+        // Scope to the anchor's card: stop at the next product heading so a
+        // card without the button never borrows the next card's button.
+        if (!seenAnchor && role === "AXHeading" && texts.includes(a1)) seenAnchor = true;
+        else if (seenAnchor && role === "AXHeading" && texts.some((t) => t)) return `NO BUTTON (card "${a1}" has no "${a2}"; next heading ${texts.find((t) => t)})`;
         else if (seenAnchor && clickable && texts.includes(a2)) return press(el, role, `${a1} > ${a2}`);
       } else if (texts.some((t) => t)) {
         lines.push([role, ...texts].join("\t"));
