@@ -186,7 +186,7 @@ if (cliAfter) {
   for (const t of cliAfter.tools ?? []) md.push(`| ${t.bin} | ${t.where ?? "—"} | ${t.version ?? "—"} | ${(t.extra ?? []).map((x) => x.path + " " + (x.version ?? "")).join("; ")} |`);
   for (const a of cliAfter.apps ?? []) md.push(`- App：${a.path} ${a.bundleId ?? ""} ${a.version ?? ""}`);
 }
-md.push("", "## 限制", "", "- 这是 GitHub-hosted 虚拟机实测，不等于真机通过。", "- runner 以管理员身份运行，UAC 提示和 SmartScreen 界面不可观察；#68 验收中的 SmartScreen 警告和 UAC 提示不在覆盖范围内。", "- 未覆盖中国大陆网络环境和 npm 镜像路径（npmmirror 等）；runner 位于境外，直连 npmjs。npmmirror 目前仍把 Grok latest 标成 0.1.4（官方 1.0.44），FyAgent 没有让用户选择镜像的设置，本次未强制镜像场景。", "- Windows ARM64：npm-preinstall 场景由测试脚本直接装 OpenCode 官方 win-x64 安装包（仿真运行），不代表 ARM 用户（官方另有 win-arm64 构建）。FyAgent v0.4.9 自身在 Windows ARM64 上对 OpenCode Desktop 返回 PlatformUnsupported（agent_install/sources/opencode.rs），不提供一键安装，既不下载 win-arm64 也不下载 win-x64；Windows x64 上下载 stable/windows-x64-nsis。");
+md.push("", "## 限制", "", "- 这是 GitHub-hosted 虚拟机实测，不等于真机通过。", "- runner 以管理员身份运行，UAC 提示和 SmartScreen 界面不可观察；#68 验收中的 SmartScreen 警告和 UAC 提示不在覆盖范围内。", "- 未覆盖中国大陆网络环境和 npm 镜像路径（npmmirror 等）；runner 位于境外，直连 npmjs。npmmirror 目前仍把 Grok latest 标成 0.1.4（官方 1.0.44），FyAgent 没有让用户选择镜像的设置，本次未强制镜像场景。", "- Windows ARM64：npm-preinstall 场景由测试脚本直接装 OpenCode 官方 win-x64 安装包（仿真运行），不代表 ARM 用户（官方另有 win-arm64 构建）。FyAgent v0.4.9 在 Windows ARM64 上对 OpenCode Desktop 返回 PlatformUnsupported；0.4.10 起改为下载带版本号的官方 win-arm64 安装包。GitHub ARM runner 的 Explorer 没有桌面视图，经 Explorer 启动的安装步骤在该 runner 上环境受限。");
 writeFileSync(join(out, "summary.md"), md.join("\n") + "\n");
 if (process.env.GITHUB_STEP_SUMMARY) writeFileSync(process.env.GITHUB_STEP_SUMMARY, md.join("\n") + "\n", { flag: "a" });
 console.log(md.join("\n"));
