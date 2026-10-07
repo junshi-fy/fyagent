@@ -3,7 +3,6 @@ import { GithubLogoIcon } from "@phosphor-icons/react/dist/csr/GithubLogo";
 import { StarIcon } from "@phosphor-icons/react/dist/csr/Star";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
-import { detectNativePlatform } from "../../shared/platform";
 import { ExternalLinkButton } from "../../shared/features/controls/ExternalLinkButton";
 import { useAppVersion } from "../../shared/features/useAppVersion";
 import { Button, IconButton } from "../../shared/ui/Button";
@@ -15,8 +14,6 @@ import {
   buildFeedbackUrl,
   dismissStarPrompt,
   readStarPromptDismissed,
-  resolveAboutLocale,
-  type AboutLocale,
 } from "./aboutDialogState";
 import "./about-dialog.css";
 
@@ -24,22 +21,17 @@ export default function AboutDialog({
   open,
   onOpenChange,
   originRef,
-  locale,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   originRef: DialogOriginRef;
-  locale?: AboutLocale;
 }) {
   const version = useAppVersion(open);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [starDismissed, setStarDismissed] = useState(readStarPromptDismissed);
-  const activeLocale = resolveAboutLocale(locale);
-  const copy = ABOUT_COPY[activeLocale];
-  const platform = detectNativePlatform();
+  const copy = ABOUT_COPY;
   const feedbackUrl = buildFeedbackUrl({
     version: version.data,
-    platform,
   });
 
   const handleDismissStar = () => {

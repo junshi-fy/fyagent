@@ -1,20 +1,16 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FeatureProvider } from "@/shared/features/provider";
 import { createBrowserFeaturePorts } from "@/shared/platform/browser/features";
-import { detectNativePlatform } from "@/shared/platform";
 import { TopBar } from "@/widgets/app-shell/TopBar";
 import AboutDialog from "@/widgets/app-shell/AboutDialog";
 import {
-  ABOUT_COPY,
   PROJECT_URL,
   STAR_PROMPT_DISMISSED_KEY,
-  buildFeedbackUrl,
   readStarPromptDismissed,
   resetStarPromptDismissed,
-  resolveAboutLocale,
 } from "@/widgets/app-shell/aboutDialogState";
 
 function fixture(readVersion = vi.fn(async () => "9.8.7")) {
@@ -30,7 +26,29 @@ function fixture(readVersion = vi.fn(async () => "9.8.7")) {
   return { readVersion, openExternal, user: userEvent.setup() };
 }
 
+function directFixture(user = userEvent.setup()) {
+  const ports = createBrowserFeaturePorts();
+  ports.settings.getAppVersion = vi.fn(async () => "9.8.7");
+  const openExternal = vi.fn(async () => {});
+  ports.settings.openExternal = openExternal;
+  const result = render(
+    <FeatureProvider ports={ports}>
+      <AboutDialog
+        open={true}
+        onOpenChange={() => {}}
+        originRef={{ current: null }}
+      />
+    </FeatureProvider>,
+  );
+  return { ...result, openExternal, user };
+}
+
 describe("About dialog", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     localStorage.clear();
     resetStarPromptDismissed();
@@ -94,33 +112,38 @@ describe("About dialog", () => {
     );
   });
 
-  it("opens feedback issue with current version and system platform", async () => {
-    const { openExternal, user } = fixture();
-    const trigger = screen.getByRole("button", { name: "关于 FyAgent" });
-    await user.click(trigger);
-    await act(async () => {
-      await vi.dynamicImportSettled();
-    });
-    const dialog = await screen.findByRole("dialog", { name: "关于 FyAgent" });
-    expect(await within(dialog).findByText("9.8.7")).toBeVisible();
-
-    const feedbackButton = within(dialog).getByRole("button", {
-      name: "反馈问题",
-    });
-    await user.click(feedbackButton);
-
-    const expectedUrl = buildFeedbackUrl({
-      version: "9.8.7",
-      platform: detectNativePlatform(),
-    });
-    expect(openExternal).toHaveBeenLastCalledWith(expectedUrl);
-    expect(expectedUrl).toContain(
-      "https://github.com/fy-agent/fyagent/issues/new",
-    );
-    expect(expectedUrl).toContain("template=bug_report.yml");
-    expect(expectedUrl).toContain("version=9.8.7");
-    expect(expectedUrl).toContain(`platform=${detectNativePlatform()}`);
-  });
+  it.each([
+    [
+      "Windows",
+      { platform: "Win32", userAgent: "Windows NT 10.0" },
+      "https://github.com/fy-agent/fyagent/issues/new?template=bug_report.yml&version=9.8.7&os=Windows",
+    ],
+    [
+      "macOS",
+      { platform: "MacIntel", userAgent: "Macintosh" },
+      "https://github.com/fy-agent/fyagent/issues/new?template=bug_report.yml&version=9.8.7&os=macOS",
+    ],
+    [
+      "Linux",
+      { platform: "Linux x86_64", userAgent: "Linux" },
+      "https://github.com/fy-agent/fyagent/issues/new?template=bug_report.yml&version=9.8.7",
+    ],
+    [
+      "unknown",
+      undefined,
+      "https://github.com/fy-agent/fyagent/issues/new?template=bug_report.yml&version=9.8.7",
+    ],
+  ])(
+    "opens feedback with version and the supported OS for %s",
+    async (_name, navigatorIdentity, expectedUrl) => {
+      const user = userEvent.setup();
+      vi.stubGlobal("navigator", navigatorIdentity);
+      const { openExternal } = directFixture(user);
+      expect(await screen.findByText("9.8.7")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "反馈问题" }));
+      expect(openExternal).toHaveBeenCalledExactlyOnceWith(expectedUrl);
+    },
+  );
 
   it("displays dismissible star banner and permanently never appears again after dismissal", async () => {
     const { openExternal, user } = fixture();
@@ -137,10 +160,9 @@ describe("About dialog", () => {
         "如果 FyAgent 帮到了你，请在 GitHub 点个 Star，这对我们意义重大",
       ),
     ).toBeVisible();
-    const starButton = within(dialog).getByRole(
-      "button",
-      { name: "去点 Star" },
-    );
+    const starButton = within(dialog).getByRole("button", {
+      name: "去点 Star",
+    });
     expect(starButton).toBeVisible();
 
     // Clicking star button opens repository
@@ -182,94 +204,67 @@ describe("About dialog", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("supports zh, en, and ja locales with complete copy dictionary", () => {
-    expect(resolveAboutLocale("zh")).toBe("zh");
-    expect(resolveAboutLocale("zh-CN")).toBe("zh");
-    expect(resolveAboutLocale("en")).toBe("en");
-    expect(resolveAboutLocale("en-US")).toBe("en");
-    expect(resolveAboutLocale("ja")).toBe("ja");
-    expect(resolveAboutLocale("ja-JP")).toBe("ja");
-    expect(resolveAboutLocale(undefined)).toBe("zh");
-
-    for (const lang of ["zh", "en", "ja"] as const) {
-      const copy = ABOUT_COPY[lang];
-      expect(copy.title).toBeTruthy();
-      expect(copy.description).toBeTruthy();
-      expect(copy.close).toBeTruthy();
-      expect(copy.currentVersion).toBeTruthy();
-      expect(copy.versionUnavailable).toBeTruthy();
-      expect(copy.checkUpdates).toBeTruthy();
-      expect(copy.helpAndFeedback).toBeTruthy();
-      expect(copy.feedback).toBeTruthy();
-      expect(copy.starPrompt).toBeTruthy();
-      expect(copy.starButton).toBeTruthy();
-      expect(copy.dismissStarPrompt).toBeTruthy();
-      expect(copy.releaseAndLicense).toBeTruthy();
-    }
+  it("hides the banner on first mount when dismissal is already stored", () => {
+    localStorage.setItem(STAR_PROMPT_DISMISSED_KEY, "1");
+    directFixture();
+    expect(
+      screen.queryByRole("button", { name: "关闭点星提示" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "关于 FyAgent" })).toBeVisible();
   });
 
-  it("renders with custom locale prop for en and ja", () => {
-    const originRef = { current: null };
-    const ports = createBrowserFeaturePorts();
-
-    // Render English
-    const { unmount: unmountEn } = render(
-      <FeatureProvider ports={ports}>
-        <AboutDialog
-          open={true}
-          onOpenChange={() => {}}
-          originRef={originRef}
-          locale="en"
-        />
-      </FeatureProvider>,
-    );
+  it("keeps the banner dismissed after unmounting and mounting again", async () => {
+    const { user, unmount } = directFixture();
+    await user.click(screen.getByRole("button", { name: "关闭点星提示" }));
+    unmount();
+    directFixture();
     expect(
-      screen.getByRole("dialog", { name: "About FyAgent" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "If FyAgent has helped you, please star us on GitHub — it means a lot to us",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Star on GitHub" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Report Issue" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Dismiss star prompt" }),
-    ).toBeInTheDocument();
-    unmountEn();
-
-    // Render Japanese
-    const { unmount: unmountJa } = render(
-      <FeatureProvider ports={ports}>
-        <AboutDialog
-          open={true}
-          onOpenChange={() => {}}
-          originRef={originRef}
-          locale="ja"
-        />
-      </FeatureProvider>,
-    );
-    expect(
-      screen.getByRole("dialog", { name: "FyAgent について" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "FyAgent がお役に立てたなら、GitHub でスターをお願いします。私たちにとって大きな励みになります",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "GitHub でスター" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "問題を報告" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "スターの案内を閉じる" }),
-    ).toBeInTheDocument();
-    unmountJa();
+      screen.queryByRole("button", { name: "关闭点星提示" }),
+    ).not.toBeInTheDocument();
   });
+
+  it("shows and dismisses the banner when reading storage throws", async () => {
+    const getItem = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new Error("Storage denied");
+      });
+    const { user } = directFixture();
+    expect(getItem).toHaveBeenCalledWith(STAR_PROMPT_DISMISSED_KEY);
+    await user.click(screen.getByRole("button", { name: "关闭点星提示" }));
+    expect(
+      screen.queryByRole("button", { name: "关闭点星提示" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("dismisses in memory when writing storage throws and shows again on remount", async () => {
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("Storage denied");
+      });
+    const { user, unmount } = directFixture();
+    await user.click(screen.getByRole("button", { name: "关闭点星提示" }));
+    expect(setItem).toHaveBeenCalledWith(STAR_PROMPT_DISMISSED_KEY, "1");
+    expect(
+      screen.queryByRole("button", { name: "关闭点星提示" }),
+    ).not.toBeInTheDocument();
+    unmount();
+    directFixture();
+    expect(screen.getByRole("button", { name: "关闭点星提示" })).toBeVisible();
+  });
+
+  it.each(["{Enter}", " "])(
+    "dismisses the banner using the keyboard: %s",
+    async (key) => {
+      vi.stubGlobal("PointerEvent", MouseEvent);
+      const { user } = directFixture();
+      screen.getByRole("button", { name: "关闭点星提示" }).focus();
+      await user.keyboard(key);
+      expect(
+        screen.queryByRole("button", { name: "关闭点星提示" }),
+      ).not.toBeInTheDocument();
+      expect(localStorage.getItem(STAR_PROMPT_DISMISSED_KEY)).toBe("1");
+    },
+  );
 });
