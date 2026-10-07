@@ -61,8 +61,9 @@ native settings during cleanup.
 
 Runtime update checks do not depend on `bundle.createUpdaterArtifacts`.
 Keep it `false` in default builds to avoid packaging failures without a signing
-private key. The release pipeline signs the final (Authenticode-signed or notarized)
-artifacts with the signing private key to produce `.sig` files.
+private key. The release pipeline runs `tauri signer sign` on final bytes only: the
+Authenticode-signed Windows `*-setup.exe`, and on macOS a `.app.tar.gz` of the
+stapled `FyAgent.app` (archive root `FyAgent.app/`), never the DMG.
 
 ## 4. Validation & Error Matrix
 

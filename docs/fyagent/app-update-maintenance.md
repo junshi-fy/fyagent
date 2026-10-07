@@ -10,7 +10,11 @@
 
 默认构建保持 `bundle.createUpdaterArtifacts: false`，避免只有公钥、没有私钥时打包失败；运行时检查更新不依赖此开关。更新产物和 `.sig` 由发版流水线在签名私钥可用时生成。
 
-下一项流水线工作需要通过秘密配置注入 `TAURI_SIGNING_PRIVATE_KEY`，在最终签名后的安装包上用 `tauri signer sign` 生成 `.sig`（不在 `tauri build` 时打开 `createUpdaterArtifacts`，因为之后的 Authenticode 签名、公证会改动字节），并生成 updater 格式的 `latest.json`，扩充发布附件合同并验证下载后的实际字节。Windows Authenticode 签名应先完成，再生成 Tauri 更新签名；若在更新签名之后修改安装包，原 `.sig` 会失效。macOS 更新包也必须覆盖最终签署、公证和后台 helper 的实际产物。
+下一项流水线工作在最终字节上用 `tauri signer sign` 生成 `.sig`，不在 `tauri build` 时打开 `createUpdaterArtifacts`（之后的嵌 helper、Authenticode 签名、Developer ID 签名和公证都会改动字节，提前生成的 `.sig` 会对不上）。仓库 secret 名为 `TAURI_SIGNING_PRIVATE_KEY`（口令 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`），但 `tauri signer sign` 子命令（CLI 2.8.x）读取的是 `TAURI_PRIVATE_KEY`（或 `TAURI_PRIVATE_KEY_PATH`）和口令 `TAURI_PRIVATE_KEY_PASSWORD`，流水线须把 secret 映射到这几个变量再调用；`TAURI_SIGNING_PRIVATE_KEY*` 只被打包期的 `createUpdaterArtifacts` 签名读取。
+
+签名对象：Windows 是 Authenticode 签名并封存之后的 `*-setup.exe`；macOS 不是 DMG（更新器不安装 DMG），而是在嵌入 helper、Developer ID 签名、公证并 staple 之后的 `FyAgent.app` 上打的 `.app.tar.gz`，归档根目录必须是 `FyAgent.app/`（插件 2.12.0 解压时丢掉第一层路径，与 CLI 自带打包布局一致）。随后生成 updater 格式的 `latest.json`，扩充发布附件合同并验证下载后的实际字节。
+
+CLI 2.8.x 的 `.sig` 可信注释只有 `timestamp` 和 `file`，不含版本号；插件的 `requireSignedVersion` 默认关闭，当前配置也没开。仍用这一版 CLI 签名时不要打开该开关，否则更新会被拒绝。
 
 ## 下载地址
 
