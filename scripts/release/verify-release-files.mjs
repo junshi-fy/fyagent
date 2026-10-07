@@ -7,7 +7,7 @@ import {
   expectedReleaseAttachmentNames,
 } from "./release-contract.mjs";
 
-const [mode, directory, version] = process.argv.slice(2);
+const [mode, directory, version, releaseMode] = process.argv.slice(2);
 const expectedByMode = {
   installers: expectedInstallerNames,
   subjects: expectedAttestationSubjectNames,
@@ -16,13 +16,13 @@ const expectedByMode = {
 
 if (!expectedByMode[mode] || !directory || !version) {
   console.error(
-    "Usage: node scripts/release/verify-release-files.mjs <installers|subjects|attachments> <directory> <version>",
+    "Usage: node scripts/release/verify-release-files.mjs <installers|subjects|attachments> <directory> <version> [formal|preflight]",
   );
   process.exit(1);
 }
 
 try {
-  const expected = expectedByMode[mode](version);
+  const expected = expectedByMode[mode](version, releaseMode);
   assertExactFileSet(directory, expected, `${mode} directory`);
   console.log(
     `${mode} directory contains exactly ${expected.length} approved files`,

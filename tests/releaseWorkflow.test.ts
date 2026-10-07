@@ -401,14 +401,16 @@ const EXPECTED_RELEASE_JOB_IDS = [
   "seal-windows-formal",
   "build-macos",
   "pin-release-build-inputs",
+  "sign-updates-formal",
   "verify-assets",
   "attest",
+  "sync-update-mirror",
   "publish",
 ] as const;
 
 const ATTEST_JOB_IF_LINE = "    if: ${{ !cancelled() }}";
 const PUBLISH_JOB_IF_LINE =
-  "    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.eligibility.result == 'success' && needs.eligibility.outputs.release_mode == 'formal' && needs.attest.result == 'success' }}";
+  "    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.eligibility.result == 'success' && needs.eligibility.outputs.release_mode == 'formal' && needs.attest.result == 'success' && ((needs.eligibility.outputs.mirror_base_url == '' && needs['sync-update-mirror'].result == 'skipped') || (needs.eligibility.outputs.mirror_base_url != '' && needs['sync-update-mirror'].result == 'success')) }}";
 const ATTEST_PREREQUISITE_STEP = `      - name: Require successful attestation prerequisites
         shell: bash
         env:
@@ -443,6 +445,8 @@ type ReleaseTailGateInput = {
   eventName: "push" | "workflow_dispatch";
   mode: "formal" | "preflight";
   verifyAssetsResult: TailJobResult;
+  mirrorConfigured?: boolean;
+  mirrorResult?: TailJobResult;
 };
 
 function releaseTailGateOutcome(input: ReleaseTailGateInput) {
@@ -458,13 +462,16 @@ function releaseTailGateOutcome(input: ReleaseTailGateInput) {
     (input.eventName === "push" || input.eventName === "workflow_dispatch") &&
     input.eligibilityResult === "success" &&
     input.mode === "formal" &&
-    attestResult === "success";
+    attestResult === "success" &&
+    (input.mirrorConfigured
+      ? input.mirrorResult === "success"
+      : (input.mirrorResult ?? "skipped") === "skipped");
 
   return { attestResult, attestRuns, publishRuns };
 }
 
 function assertReleaseTailStatusGates(workflow: string) {
-  const attest = workflowJobBlock(workflow, "attest", "publish");
+  const attest = workflowJobBlock(workflow, "attest", "sync-update-mirror");
   const publish = workflow.slice(workflow.indexOf("\n  publish:\n"));
 
   const exactLineCount = (block: string, line: string) =>
@@ -1563,6 +1570,30 @@ describe("FyAgent release workflow", () => {
     }
   });
 
+  it.each([
+    [false, "skipped", true],
+    [false, "success", false],
+    [false, "failure", false],
+    [true, "success", true],
+    [true, "failure", false],
+    [true, "skipped", false],
+  ] as const)(
+    "gates publication with mirror configured=%s result=%s",
+    (mirrorConfigured, mirrorResult, publishRuns) => {
+      expect(
+        releaseTailGateOutcome({
+          cancelled: false,
+          eligibilityResult: "success",
+          eventName: "push",
+          mode: "formal",
+          verifyAssetsResult: "success",
+          mirrorConfigured,
+          mirrorResult,
+        }).publishRuns,
+      ).toBe(publishRuns);
+    },
+  );
+
   it("keeps authorized run observation synchronous and completion-scoped", () => {
     expect(source).toContain(
       "Authorized callers wait synchronously for this whole run to complete",
@@ -1602,9 +1633,9 @@ describe("FyAgent release workflow", () => {
     }
     for (const [job, nextJob] of [
       ["eligibility", "build-windows"],
-      ["pin-release-build-inputs", "verify-assets"],
+      ["pin-release-build-inputs", "sign-updates-formal"],
       ["verify-assets", "attest"],
-      ["attest", "publish"],
+      ["attest", "sync-update-mirror"],
     ] as const) {
       expectExactLine(
         workflowJobBlock(source, job, nextJob),
@@ -1622,7 +1653,7 @@ describe("FyAgent release workflow", () => {
     );
     expect(source).not.toContain("cache: true");
     expect(source).not.toContain("cache: pnpm");
-    expect(source.match(/package-manager-cache: false/g)).toHaveLength(2);
+    expect(source.match(/package-manager-cache: false/g)).toHaveLength(3);
     expect(source.match(/uses: actions\/checkout@/g)).toHaveLength(
       source.match(/persist-credentials: false/g)?.length ?? 0,
     );
@@ -2165,10 +2196,10 @@ describe("FyAgent release workflow", () => {
     const verify = workflowJobBlock(source, "verify-assets", "attest");
     expectExactLine(
       verify,
-      "    if: ${{ always() && needs.eligibility.result == 'success' && needs['build-windows'].result == 'success' && needs['build-macos'].result == 'success' && needs['pin-release-build-inputs'].result == 'success' && ((github.event_name == 'workflow_dispatch' && needs.eligibility.outputs.release_mode == 'preflight' && needs['prove-windows-preflight'].result == 'success' && needs['sign-windows-formal'].result == 'skipped' && needs['seal-windows-formal'].result == 'skipped') || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.eligibility.outputs.release_mode == 'formal' && needs['prove-windows-preflight'].result == 'skipped' && needs['sign-windows-formal'].result == 'success' && needs['seal-windows-formal'].result == 'success')) }}",
+      "    if: ${{ always() && needs.eligibility.result == 'success' && needs['build-windows'].result == 'success' && needs['build-macos'].result == 'success' && needs['pin-release-build-inputs'].result == 'success' && ((github.event_name == 'workflow_dispatch' && needs.eligibility.outputs.release_mode == 'preflight' && needs['prove-windows-preflight'].result == 'success' && needs['sign-windows-formal'].result == 'skipped' && needs['seal-windows-formal'].result == 'skipped' && needs['sign-updates-formal'].result == 'skipped') || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.eligibility.outputs.release_mode == 'formal' && needs['prove-windows-preflight'].result == 'skipped' && needs['sign-windows-formal'].result == 'success' && needs['seal-windows-formal'].result == 'success' && needs['sign-updates-formal'].result == 'success')) }}",
     );
     expect(verify).toContain(
-      "    needs:\n      [\n        eligibility,\n        build-windows,\n        build-macos,\n        pin-release-build-inputs,\n        prove-windows-preflight,\n        sign-windows-formal,\n        seal-windows-formal,\n      ]",
+      "    needs:\n      [\n        eligibility,\n        build-windows,\n        build-macos,\n        pin-release-build-inputs,\n        prove-windows-preflight,\n        sign-windows-formal,\n        seal-windows-formal,\n        sign-updates-formal,\n      ]",
     );
     expect(verify).toContain(
       "artifact-ids: ${{ needs['pin-release-build-inputs'].outputs.artifact_id }}",
@@ -2341,7 +2372,7 @@ jobs:
     const pin = workflowJobBlock(
       source,
       "pin-release-build-inputs",
-      "verify-assets",
+      "sign-updates-formal",
     );
     expectExactLine(
       pin,
@@ -2378,7 +2409,7 @@ jobs:
     expect(formal).toContain("pin-release-build-inputs");
   });
 
-  it("aggregates signing evidence and attests six subjects into seven attachments", () => {
+  it("aggregates signing evidence into mode-specific subjects and attachments", () => {
     const verify = workflowJobBlock(source, "verify-assets", "attest");
     expect(verify).toContain(
       "artifact-ids: ${{ needs['pin-release-build-inputs'].outputs.artifact_id }}",
@@ -2398,21 +2429,26 @@ jobs:
       "--arm64-status signing-fragments/windows-signing-arm64.json",
     );
     expect(verify).toContain("--output verified-subjects/signing-status.json");
-    expect(verify).toContain("Upload the exact six attestation subjects");
+    expect(verify).toContain(
+      "Upload the exact mode-specific attestation subjects",
+    );
 
-    const attest = workflowJobBlock(source, "attest", "publish");
+    const attest = workflowJobBlock(source, "attest", "sync-update-mirror");
     expectExactLine(attest, "    needs: [eligibility, verify-assets]");
     expectExactLine(attest, "    runs-on: ubuntu-24.04");
     expect(attest).toContain(
       "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6",
     );
     expect(attest).toContain("subject-path: verified-subjects/*");
-    expect(attest).toContain("Recheck the exact six subjects");
-    expect(attest).toContain("exact seven Release attachments");
+    expect(attest).toContain("Recheck the exact mode-specific subjects");
+    expect(attest).toContain("exact mode-specific Release attachments");
     expect(attest).toContain("prepare-release-publication.mjs assemble");
 
     const publish = source.slice(source.indexOf("\n  publish:\n"));
-    expectExactLine(publish, "    needs: [eligibility, attest]");
+    expectExactLine(
+      publish,
+      "    needs: [eligibility, attest, sync-update-mirror]",
+    );
     expectExactLine(publish, "    runs-on: ubuntu-24.04");
     expect(publish).toContain("fyagent-windows-signing-status/v1");
     expect(publish).toContain("## Windows installer signing status");
@@ -2423,8 +2459,8 @@ jobs:
     expect(publish).toContain(".attestation.subjectName");
     expect(publish).toContain(".attestation.subjectDigest");
     expect(publish).toContain("signing-status.json");
-    expect(publish).toContain("length == 7");
-    expect(publish).toContain("(.assets | length) == 7");
+    expect(publish).toContain("length == 12");
+    expect(publish).toContain("(.assets | length) == 12");
   });
 
   it("seals the universal macOS app with Developer ID and notarizes the DMG", () => {
@@ -2633,7 +2669,7 @@ jobs:
     expect(macJob).not.toContain("codesign --force --sign -");
     expect(
       macJob.match(/scripts\/release\/verify-macos-signed-app\.sh/gu),
-    ).toHaveLength(3);
+    ).toHaveLength(5);
     const appStaple = macJob.indexOf(
       'scripts/release/macos-developer-id.sh staple-app "$APP_PATH"',
     );
@@ -3180,16 +3216,144 @@ jobs:
     );
   });
 
-  it("keeps formal assets free of MSI, WiX, portable, and updater surfaces", () => {
-    const normalized = source.toLowerCase();
-    expect(source).not.toMatch(
-      /(?:verified-subjects|release-attachments)\/latest\.json/i,
+  it("isolates formal updater secrets while retaining the MSI, WiX and portable ban", () => {
+    const signer = workflowJobBlock(
+      source,
+      "sign-updates-formal",
+      "verify-assets",
     );
-    expect(normalized).not.toContain("tauri_signing_private_key");
-    expect(normalized).not.toContain("portable");
+    const eligibility = workflowJobBlock(
+      source,
+      "eligibility",
+      "build-windows",
+    );
+    const config = namedStepBlock(
+      eligibility,
+      "Validate formal updater configuration before native builds",
+    );
+    expect(config).toContain(
+      "if: steps.contract.outputs.release_mode == 'formal'",
+    );
+    expect(config).toContain("secrets.TAURI_SIGNING_PRIVATE_KEY != ''");
+    expect(config).toContain(
+      "secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD != ''",
+    );
+    expect(config).not.toContain("TAURI_PRIVATE_KEY:");
+    expect(signer).toContain(
+      "needs.eligibility.outputs.release_mode == 'formal'",
+    );
+    expect(signer).toContain(
+      "needs['seal-windows-formal'].result == 'success'",
+    );
+    expect(signer).toContain(
+      "TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}",
+    );
+    expect(signer).toContain(
+      "TAURI_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}",
+    );
+    expect(signer).toContain('pnpm tauri signer sign "$file" >/dev/null 2>&1');
+    expect(signer).toContain("updater-release.mjs verify-local");
+    const withoutSigner = source.replace(signer, "");
+    expect(withoutSigner).not.toContain(
+      "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}",
+    );
+    expect(withoutSigner).not.toContain(
+      "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}",
+    );
+    expect(JSON.parse(read(TAURI_CONFIG)).bundle.createUpdaterArtifacts).toBe(
+      false,
+    );
+    const preflight = workflowJobBlock(
+      source,
+      "prove-windows-preflight",
+      "sign-windows-formal",
+    );
+    expect(preflight).not.toContain("TAURI_PRIVATE_KEY");
+    expect(preflight).not.toContain("signer sign");
+    expect(preflight).not.toContain("latest.json");
+    expect(source.toLowerCase()).not.toContain("portable");
     expect(source).not.toMatch(/\.msi\b/i);
     expect(source).not.toMatch(/\bwix\b/i);
     expect(source).not.toContain("installer-actions");
+  });
+
+  it("packages the final ticketed app and binds updater additions into attestation", () => {
+    const mac = workflowJobBlock(
+      source,
+      "build-macos",
+      "pin-release-build-inputs",
+    );
+    const archive = namedStepBlock(
+      mac,
+      "Archive the final notarized and stapled app for updater signing",
+    );
+    expect(archive).toContain(
+      "if: needs.eligibility.outputs.release_mode == 'formal'",
+    );
+    expect(mac.indexOf("staple-app")).toBeLessThan(
+      mac.indexOf("Archive the final notarized"),
+    );
+    expect(archive).toContain('tar -czf "$archive"');
+    expect(archive).toContain('diff -qr "$APP_PATH" "$extracted/FyAgent.app"');
+    expect(archive).toContain(
+      'verify-macos-signed-app.sh "$extracted/FyAgent.app"',
+    );
+    const verify = workflowJobBlock(source, "verify-assets", "attest");
+    expect(verify).toContain(
+      "artifact-ids: ${{ needs['sign-updates-formal'].outputs.artifact_id }}",
+    );
+    expect(verify).toContain(
+      "updater-release.mjs verify-local verified-subjects",
+    );
+    expect(verify).toContain("cp updater-additions/* verified-subjects/");
+    expect(verify).toContain(
+      'subjects verified-subjects "$APP_VERSION" "$RELEASE_MODE"',
+    );
+  });
+
+  it("freezes mirror compilation and fails publication on synchronization or readback failure", () => {
+    const mirror = workflowJobBlock(source, "sync-update-mirror", "publish");
+    const publish = source.slice(source.indexOf("\n  publish:\n"));
+    expect(mirror).toContain(
+      "needs.eligibility.outputs.release_mode == 'formal'",
+    );
+    expect(mirror).toContain("needs.eligibility.outputs.mirror_base_url != ''");
+    expect(mirror).toContain("needs.attest.result == 'success'");
+    expect(mirror).toContain("contents: read");
+    expect(mirror).not.toContain("contents: write");
+    expect(mirror).toContain("sync-updater-mirror.mjs");
+    expect(mirror).toContain('"$MIRROR_BASE_URL/latest.json"');
+    expect(mirror).toContain("updater-release.mjs readback");
+    expect(source.replace(mirror, "")).not.toContain(
+      "${{ secrets.FYAGENT_UPDATE_MIRROR_SECRET_ACCESS_KEY }}",
+    );
+    expect(source.replace(mirror, "")).not.toContain(
+      "${{ secrets.FYAGENT_UPDATE_MIRROR_ACCESS_KEY_ID }}",
+    );
+    expect(publish).toContain(
+      "needs['sync-update-mirror'].result == 'success'",
+    );
+    expect(publish).toContain(
+      "needs.eligibility.outputs.mirror_base_url == '' && needs['sync-update-mirror'].result == 'skipped'",
+    );
+    expect(publish).toContain("未配置镜像");
+    expect(publish.indexOf("updater-release.mjs readback")).toBeGreaterThan(
+      publish.indexOf("--request PATCH"),
+    );
+    expect(publish).toContain(
+      "https://github.com/fy-agent/fyagent/releases/latest/download/latest.json",
+    );
+    const endpoint =
+      "FYAGENT_UPDATE_MIRROR_ENDPOINT: ${{ needs.eligibility.outputs.release_mode == 'formal' && needs.eligibility.outputs.mirror_base_url != '' && format('{0}/latest.json', needs.eligibility.outputs.mirror_base_url) || '' }}";
+    expect(
+      namedStepBlock(source, "Build Windows application executable"),
+    ).toContain(endpoint);
+    expect(
+      namedStepBlock(
+        source,
+        "Build universal macOS app with privileged client linkage",
+      ),
+    ).toContain(endpoint);
   });
 });
 

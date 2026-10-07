@@ -1,0 +1,42 @@
+{
+  "name": "update-release-pipeline",
+  "status": "in_progress",
+  "branch": "feat/update-release-pipeline",
+  "base_branch": "feat/one-click-update",
+  "summary": "实现完成；沙箱外 10 个定向测试文件 262 项全过（含签名干跑）；平台检查、typecheck、lint、Prettier、diff --check 通过；actionlint 1.7.12+shellcheck 只剩 4 个既有 runner 标签诊断；正式启用待正式密钥、国内镜像配置与首次发版实测",
+  "implementation": "complete",
+  "verification": "passed_local",
+  "verification_results": {
+    "unit": {
+      "passed": 262,
+      "failed": 0,
+      "files_passed": 10,
+      "files_failed": 0
+    },
+    "signing_dry_run": "passed, throwaway key in system temp dir, deleted after test",
+    "actionlint": {
+      "version": "1.7.12 with shellcheck 0.11.0",
+      "exit_code": 1,
+      "diagnostics": 4,
+      "baseline_diagnostics": 4,
+      "cause": "existing unknown runner label windows-11-vs2026-arm"
+    },
+    "supported_platform_check": "passed",
+    "typecheck": "passed",
+    "lint": "passed",
+    "prettier": "passed",
+    "git_diff_check": "passed",
+    "full_unit": "27 failures in 6 host-integration/governance files; identical 27 failures on unmodified main (local mise/host environment)",
+    "live_formal": "pending production keys, mirror configuration and first formal release"
+  },
+  "deliverables": [
+    ".github/workflows/release.yml",
+    "scripts/release/updater-manifest.mjs",
+    "scripts/release/updater-release.mjs",
+    "scripts/release/sync-updater-mirror.mjs",
+    "tests/updaterManifest.test.ts",
+    "tests/updaterSigningDryRun.test.ts",
+    "docs/fyagent/app-update-maintenance.md"
+  ],
+  "acceptance_evidence": ".trellis/tasks/10-08-update-release-pipeline/acceptance.md"
+}

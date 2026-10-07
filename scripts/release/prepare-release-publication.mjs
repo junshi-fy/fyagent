@@ -29,8 +29,12 @@ function assertSafeAssetName(name) {
   return name;
 }
 
-export function describeReleaseAttachments(directory, version) {
-  const names = expectedReleaseAttachmentNames(version);
+export function describeReleaseAttachments(
+  directory,
+  version,
+  releaseMode = "preflight",
+) {
+  const names = expectedReleaseAttachmentNames(version, releaseMode);
   const files = assertExactFileSet(directory, names, "Release attachments");
   return Promise.all(
     files.map(async (filePath, index) => ({
@@ -57,11 +61,17 @@ export async function verifyDownloadedReleaseAttachments({
   sourceDirectory,
   downloadedDirectory,
   version,
+  releaseMode = "preflight",
 }) {
-  const expected = await describeReleaseAttachments(sourceDirectory, version);
+  const expected = await describeReleaseAttachments(
+    sourceDirectory,
+    version,
+    releaseMode,
+  );
   const downloaded = await describeReleaseAttachments(
     downloadedDirectory,
     version,
+    releaseMode,
   );
   assert(
     JSON.stringify(
@@ -80,9 +90,13 @@ export async function assembleReleaseAttachments({
   bundlePath,
   outputDirectory,
   version,
+  releaseMode = "preflight",
 }) {
   mkdirSync(outputDirectory);
-  const subjectNames = expectedReleaseAttachmentNames(version).slice(0, -1);
+  const subjectNames = expectedReleaseAttachmentNames(
+    version,
+    releaseMode,
+  ).slice(0, -1);
   const subjectPaths = assertExactFileSet(
     subjectsDirectory,
     subjectNames,
@@ -95,7 +109,9 @@ export async function assembleReleaseAttachments({
       constants.COPYFILE_EXCL,
     );
   }
-  const bundleName = expectedReleaseAttachmentNames(version).at(-1);
+  const bundleName = expectedReleaseAttachmentNames(version, releaseMode).at(
+    -1,
+  );
   assert(bundleName, "Attestation bundle name is missing");
   const bundleStat = lstatSync(bundlePath);
   assert(
@@ -107,13 +123,23 @@ export async function assembleReleaseAttachments({
     path.join(outputDirectory, bundleName),
     constants.COPYFILE_EXCL,
   );
-  return describeReleaseAttachments(outputDirectory, version);
+  return describeReleaseAttachments(outputDirectory, version, releaseMode);
 }
 
 function parseArguments(argv) {
   const [mode, ...args] = argv;
+  // Legacy callers remain preflight; formal workflow always passes the mode.
+  const expectedLengths = { list: 2, assemble: 4, "verify-downloads": 3 };
+  let releaseMode = "preflight";
+  if (args.length === expectedLengths[mode] + 1) releaseMode = args.pop();
+  assert(["formal", "preflight"].includes(releaseMode), "Invalid release mode");
   if (mode === "list" && args.length === 2) {
-    return { mode, directory: path.resolve(args[0]), version: args[1] };
+    return {
+      mode,
+      directory: path.resolve(args[0]),
+      version: args[1],
+      releaseMode,
+    };
   }
   if (mode === "assemble" && args.length === 4) {
     return {
@@ -122,6 +148,7 @@ function parseArguments(argv) {
       bundlePath: path.resolve(args[1]),
       outputDirectory: path.resolve(args[2]),
       version: args[3],
+      releaseMode,
     };
   }
   if (mode === "verify-downloads" && args.length === 3) {
@@ -130,6 +157,7 @@ function parseArguments(argv) {
       sourceDirectory: path.resolve(args[0]),
       downloadedDirectory: path.resolve(args[1]),
       version: args[2],
+      releaseMode,
     };
   }
   if (mode === "verify-target" && args.length === 3) {
@@ -154,6 +182,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
       attachments = await describeReleaseAttachments(
         input.directory,
         input.version,
+        input.releaseMode,
       );
     } else if (input.mode === "assemble") {
       attachments = await assembleReleaseAttachments(input);

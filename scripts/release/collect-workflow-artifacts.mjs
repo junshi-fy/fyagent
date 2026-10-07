@@ -9,17 +9,35 @@ import {
   assertExactDirectorySet,
   assertExactFileSet,
   expectedInstallerNames,
+  updaterArtifactNames,
 } from "./release-contract.mjs";
 
 const [mode, inputRoot, outputDirectory, version] = process.argv.slice(2);
 if (!mode || !inputRoot || !outputDirectory || !version) {
   console.error(
-    "Usage: node scripts/release/collect-workflow-artifacts.mjs <installers|metadata|signing> <download-root> <output-dir> <version>",
+    "Usage: node scripts/release/collect-workflow-artifacts.mjs <installers|metadata|signing|updates> <download-root> <output-dir> <version>",
   );
   process.exit(1);
 }
 
 try {
+  if (mode === "updates") {
+    const names = updaterArtifactNames(version);
+    assertExactFileSet(inputRoot, names, "formal updater artifact");
+    mkdirSync(outputDirectory);
+    for (const name of names) {
+      copyFileSync(
+        join(inputRoot, name),
+        join(outputDirectory, name),
+        constants.COPYFILE_EXCL,
+      );
+    }
+    assertExactFileSet(outputDirectory, names, "collected updater artifact");
+    console.log(
+      "Collected exactly five formal updater files without overwrite",
+    );
+    process.exit(0);
+  }
   if (!(mode === "installers" || mode === "metadata" || mode === "signing")) {
     throw new Error(`Unsupported artifact collection mode: ${mode}`);
   }

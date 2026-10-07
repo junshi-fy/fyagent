@@ -50,12 +50,14 @@ const assembleReleaseAttachments =
     bundlePath: string;
     outputDirectory: string;
     version: string;
+    releaseMode?: "formal" | "preflight";
   }) => Promise<Array<{ name: string; size: number; sha256: string }>>;
 const verifyDownloadedReleaseAttachments =
   publicationModule.verifyDownloadedReleaseAttachments as (input: {
     sourceDirectory: string;
     downloadedDirectory: string;
     version: string;
+    releaseMode?: "formal" | "preflight";
   }) => Promise<Array<{ name: string; size: number; sha256: string }>>;
 
 const identity: ReleaseIdentity = {
@@ -215,7 +217,7 @@ describe("release asset and metadata contract", () => {
     ]);
   });
 
-  it("freezes three installers, six subjects, and seven attachments", () => {
+  it("freezes preflight at three installers, six subjects, and seven attachments", () => {
     const installers = expectedInstallerNames("0.3.0");
     expect(PREFLIGHT_WORKFLOW_BRANCH).toBe("main");
     expect(RELEASE_BRANCH).toBe("main");
@@ -236,6 +238,78 @@ describe("release asset and metadata contract", () => {
       ATTESTATION_BUNDLE_NAME,
     ]);
     expect(expectedReleaseAttachmentNames("0.3.0")).toHaveLength(7);
+  });
+
+  it("requires exactly eleven formal subjects and twelve attachments", () => {
+    const subjects = [
+      "FyAgent-0.3.0-macOS.dmg",
+      "FyAgent-0.3.0-Windows-x64-setup.exe",
+      "FyAgent-0.3.0-Windows-arm64-setup.exe",
+      "download-manifest.json",
+      "build-metadata.json",
+      "signing-status.json",
+      "FyAgent-0.3.0-Windows-x64-setup.exe.sig",
+      "FyAgent-0.3.0-Windows-arm64-setup.exe.sig",
+      "FyAgent-0.3.0-macOS-universal.app.tar.gz",
+      "FyAgent-0.3.0-macOS-universal.app.tar.gz.sig",
+      "latest.json",
+    ];
+    expect(expectedAttestationSubjectNames("0.3.0", "formal")).toEqual(
+      subjects,
+    );
+    expect(expectedReleaseAttachmentNames("0.3.0", "formal")).toEqual([
+      ...subjects,
+      "artifact-attestation.sigstore.json",
+    ]);
+    const root = temporaryDirectory();
+    for (const name of subjects)
+      writeFileSync(path.join(root, name), `FAKE SUBJECT: ${name}`);
+    expect(() =>
+      assertExactFileSet(root, subjects, "formal subjects"),
+    ).not.toThrow();
+    rmSync(path.join(root, "latest.json"));
+    expect(() => assertExactFileSet(root, subjects, "formal subjects")).toThrow(
+      /exactly 11/,
+    );
+    expect(() =>
+      expectedAttestationSubjectNames("0.3.0", "unknown" as "formal"),
+    ).toThrow(/Invalid release mode/);
+  });
+
+  it("collects exactly five formal updater additions and rejects extras", () => {
+    const root = temporaryDirectory();
+    const input = path.join(root, "updates");
+    mkdirSync(input);
+    const names = [
+      "FyAgent-0.3.0-Windows-x64-setup.exe.sig",
+      "FyAgent-0.3.0-Windows-arm64-setup.exe.sig",
+      "FyAgent-0.3.0-macOS-universal.app.tar.gz",
+      "FyAgent-0.3.0-macOS-universal.app.tar.gz.sig",
+      "latest.json",
+    ];
+    for (const name of names)
+      writeFileSync(path.join(input, name), `FAKE UPDATE: ${name}`);
+    const output = path.join(root, "collected");
+    execFileSync(
+      process.execPath,
+      [collectorScript, "updates", input, output, "0.3.0"],
+      { stdio: "pipe" },
+    );
+    expect(readdirSync(output).sort()).toEqual([...names].sort());
+    writeFileSync(path.join(input, "unexpected.txt"), "FAKE EXTRA");
+    expect(() =>
+      execFileSync(
+        process.execPath,
+        [
+          collectorScript,
+          "updates",
+          input,
+          path.join(root, "bad-output"),
+          "0.3.0",
+        ],
+        { stdio: "pipe" },
+      ),
+    ).toThrow(/exactly 5/);
   });
 
   it("fails closed when a canonical version cannot fit NSIS fixed-file fields", () => {
@@ -663,51 +737,68 @@ describe("release asset and metadata contract", () => {
     ).toThrow(/nativeToolchain must be null/);
   });
 
-  it("assembles exactly seven attachments and verifies re-downloaded bytes", async () => {
-    const root = temporaryDirectory();
-    const subjects = path.join(root, "subjects");
-    const attachments = path.join(root, "attachments");
-    const downloaded = path.join(root, "downloaded");
-    const bundle = path.join(root, ATTESTATION_BUNDLE_NAME);
-    mkdirSync(subjects);
-    mkdirSync(downloaded);
-    for (const name of expectedAttestationSubjectNames("0.3.0")) {
-      writeFileSync(path.join(subjects, name), `subject:${name}`);
-    }
-    writeFileSync(bundle, "sigstore-bundle");
+  it.each([
+    ["preflight", 7],
+    ["formal", 12],
+  ] as const)(
+    "assembles exactly %s attachments and verifies all re-downloaded bytes",
+    async (releaseMode, count) => {
+      const root = temporaryDirectory();
+      const subjects = path.join(root, "subjects");
+      const attachments = path.join(root, "attachments");
+      const downloaded = path.join(root, "downloaded");
+      const bundle = path.join(root, ATTESTATION_BUNDLE_NAME);
+      mkdirSync(subjects);
+      mkdirSync(downloaded);
+      for (const name of expectedAttestationSubjectNames(
+        "0.3.0",
+        releaseMode,
+      )) {
+        writeFileSync(path.join(subjects, name), `subject:${name}`);
+      }
+      writeFileSync(bundle, "sigstore-bundle");
 
-    const described = await assembleReleaseAttachments({
-      subjectsDirectory: subjects,
-      bundlePath: bundle,
-      outputDirectory: attachments,
-      version: "0.3.0",
-    });
-    expect(described.map(({ name }) => name)).toEqual(
-      expectedReleaseAttachmentNames("0.3.0"),
-    );
-    expect(described).toHaveLength(7);
-
-    for (const name of expectedReleaseAttachmentNames("0.3.0")) {
-      copyFileSync(path.join(attachments, name), path.join(downloaded, name));
-    }
-    await expect(
-      verifyDownloadedReleaseAttachments({
-        sourceDirectory: attachments,
-        downloadedDirectory: downloaded,
+      const described = await assembleReleaseAttachments({
+        subjectsDirectory: subjects,
+        bundlePath: bundle,
+        outputDirectory: attachments,
         version: "0.3.0",
-      }),
-    ).resolves.toHaveLength(7);
+        releaseMode,
+      });
+      expect(described.map(({ name }) => name)).toEqual(
+        expectedReleaseAttachmentNames("0.3.0", releaseMode),
+      );
+      expect(described).toHaveLength(count);
 
-    writeFileSync(
-      path.join(downloaded, expectedInstallerNames("0.3.0")[0]),
-      "drift",
-    );
-    await expect(
-      verifyDownloadedReleaseAttachments({
-        sourceDirectory: attachments,
-        downloadedDirectory: downloaded,
-        version: "0.3.0",
-      }),
-    ).rejects.toThrow(/differ from the verified local payload/);
-  });
+      for (const name of expectedReleaseAttachmentNames("0.3.0", releaseMode)) {
+        copyFileSync(path.join(attachments, name), path.join(downloaded, name));
+      }
+      await expect(
+        verifyDownloadedReleaseAttachments({
+          sourceDirectory: attachments,
+          downloadedDirectory: downloaded,
+          version: "0.3.0",
+          releaseMode,
+        }),
+      ).resolves.toHaveLength(count);
+
+      writeFileSync(
+        path.join(
+          downloaded,
+          releaseMode === "formal"
+            ? "latest.json"
+            : expectedInstallerNames("0.3.0")[0],
+        ),
+        "drift",
+      );
+      await expect(
+        verifyDownloadedReleaseAttachments({
+          sourceDirectory: attachments,
+          downloadedDirectory: downloaded,
+          version: "0.3.0",
+          releaseMode,
+        }),
+      ).rejects.toThrow(/differ from the verified local payload/);
+    },
+  );
 });

@@ -186,17 +186,35 @@ export function expectedInstallerNames(version) {
   );
 }
 
-export function expectedAttestationSubjectNames(version) {
+export function updaterPackageNames(version) {
+  const [, x64, arm64] = expectedInstallerNames(version);
+  return [x64, arm64, `${PRODUCT_NAME}-${version}-macOS-universal.app.tar.gz`];
+}
+
+export function updaterArtifactNames(version) {
+  const [x64, arm64, macos] = updaterPackageNames(version);
+  return [`${x64}.sig`, `${arm64}.sig`, macos, `${macos}.sig`, "latest.json"];
+}
+
+export function expectedAttestationSubjectNames(version, mode = "preflight") {
+  assert(
+    ["formal", "preflight"].includes(mode),
+    `Invalid release mode: ${mode}`,
+  );
   return [
     ...expectedInstallerNames(version),
     DOWNLOAD_MANIFEST_NAME,
     BUILD_METADATA_NAME,
     WINDOWS_SIGNING_STATUS_NAME,
+    ...(mode === "formal" ? updaterArtifactNames(version) : []),
   ];
 }
 
-export function expectedReleaseAttachmentNames(version) {
-  return [...expectedAttestationSubjectNames(version), ATTESTATION_BUNDLE_NAME];
+export function expectedReleaseAttachmentNames(version, mode = "preflight") {
+  return [
+    ...expectedAttestationSubjectNames(version, mode),
+    ATTESTATION_BUNDLE_NAME,
+  ];
 }
 
 function listFlatRegularFiles(directory) {
@@ -489,9 +507,7 @@ function validatePlatformMetadata(metadata, expected, identity) {
       `${expected.targetGroup} nativeToolchain.msvc`,
     );
     assert(
-      VISUAL_STUDIO_VERSION_PATTERN.test(
-        metadata.nativeToolchain.visualStudio,
-      ),
+      VISUAL_STUDIO_VERSION_PATTERN.test(metadata.nativeToolchain.visualStudio),
       `${expected.targetGroup} Visual Studio version is outside the supported 2022/2026 range`,
     );
     assert(

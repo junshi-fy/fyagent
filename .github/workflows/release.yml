@@ -47,6 +47,7 @@ jobs:
       workflow_sha: ${{ steps.contract.outputs.workflow_sha }}
       release_mode: ${{ steps.contract.outputs.release_mode }}
       generated_at: ${{ steps.contract.outputs.generated_at }}
+      mirror_base_url: ${{ steps.updater-config.outputs.mirror_base_url }}
       ci_run_id: ${{ steps.remote.outputs.ci_run_id }}
       ci_run_attempt: ${{ steps.remote.outputs.ci_run_attempt }}
     steps:
@@ -281,6 +282,44 @@ jobs:
             printf 'generated_at=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Validate formal updater configuration before native builds
+        id: updater-config
+        if: steps.contract.outputs.release_mode == 'formal'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY_CONFIGURED: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD_CONFIGURED: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD != '' }}
+          FYAGENT_UPDATE_MIRROR_BASE_URL: ${{ vars.FYAGENT_UPDATE_MIRROR_BASE_URL }}
+          FYAGENT_UPDATE_MIRROR_S3_ENDPOINT_CONFIGURED: ${{ secrets.FYAGENT_UPDATE_MIRROR_S3_ENDPOINT != '' }}
+          FYAGENT_UPDATE_MIRROR_S3_BUCKET_CONFIGURED: ${{ secrets.FYAGENT_UPDATE_MIRROR_S3_BUCKET != '' }}
+          FYAGENT_UPDATE_MIRROR_ACCESS_KEY_ID_CONFIGURED: ${{ secrets.FYAGENT_UPDATE_MIRROR_ACCESS_KEY_ID != '' }}
+          FYAGENT_UPDATE_MIRROR_SECRET_ACCESS_KEY_CONFIGURED: ${{ secrets.FYAGENT_UPDATE_MIRROR_SECRET_ACCESS_KEY != '' }}
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.contract.outputs.release_tag }}
+          SOURCE_SHA: ${{ steps.contract.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/release/updater-release.mjs eligibility src-tauri/tauri.conf.json
+          # Reject an immutable published version before any mirror side effects.
+          release_state="$RUNNER_TEMP/fyagent-updater-existing-release.json"
+          status="$(curl --disable --silent --show-error --connect-timeout 15 --max-time 60 \
+            --output "$release_state" --write-out '%{http_code}' \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/fy-agent/fyagent/releases/tags/$RELEASE_TAG")"
+          case "$status" in
+            404) ;;
+            200)
+              jq -e '.draft == true' "$release_state" >/dev/null || {
+                echo 'A published Release already exists; refusing to replace its updater mirror bytes' >&2
+                exit 1
+              }
+              node scripts/release/verify-release-draft-ownership.mjs inspect "$release_state" "$RELEASE_TAG" "$SOURCE_SHA" >/dev/null
+              ;;
+            *) echo "Cannot inspect existing Release before updater preparation (HTTP $status)" >&2; exit 1 ;;
+          esac
+
       - name: Bind remote tag and authority-branch evidence
         id: remote
         shell: bash
@@ -408,6 +447,7 @@ jobs:
         shell: pwsh
         env:
           FYAGENT_WINDOWS_MANIFEST: release
+          FYAGENT_UPDATE_MIRROR_ENDPOINT: ${{ needs.eligibility.outputs.release_mode == 'formal' && needs.eligibility.outputs.mirror_base_url != '' && format('{0}/latest.json', needs.eligibility.outputs.mirror_base_url) || '' }}
         run: |
           $ErrorActionPreference = 'Stop'
           if ('${{ matrix.architecture }}' -eq 'arm64') {
@@ -1141,6 +1181,8 @@ jobs:
     needs: eligibility
     runs-on: macos-15
     timeout-minutes: 360
+    outputs:
+      updater_archive_id: ${{ steps.updater-archive.outputs.artifact-id }}
     env:
       APP_VERSION: ${{ needs.eligibility.outputs.app_version }}
       RELEASE_TAG: ${{ needs.eligibility.outputs.release_tag }}
@@ -1220,6 +1262,7 @@ jobs:
       - name: Build universal macOS app with privileged client linkage
         env:
           FYAGENT_PRIVILEGED_CLIENT_DYLIB: ${{ github.workspace }}/src-tauri/macos-privileged-helper/dist/libFyAgentPrivilegedClient.dylib
+          FYAGENT_UPDATE_MIRROR_ENDPOINT: ${{ needs.eligibility.outputs.release_mode == 'formal' && needs.eligibility.outputs.mirror_base_url != '' && format('{0}/latest.json', needs.eligibility.outputs.mirror_base_url) || '' }}
         run: |
           set -euo pipefail
           # The helper/client are sealed into formal artifacts now, but the
@@ -1402,6 +1445,37 @@ jobs:
           node scripts/release/prepare-release-publication.mjs verify-target \
             release-assets "$APP_VERSION" macos-universal
 
+      - name: Archive the final notarized and stapled app for updater signing
+        if: needs.eligibility.outputs.release_mode == 'formal'
+        shell: bash
+        env:
+          APP_PATH: ${{ steps.app.outputs.app_path }}
+        run: |
+          set -euo pipefail
+          scripts/release/verify-macos-signed-app.sh "$APP_PATH"
+          mkdir updater-archive
+          archive="updater-archive/FyAgent-${APP_VERSION}-macOS-universal.app.tar.gz"
+          # Preserve the complete ticketed app, including the embedded helper.
+          # The updater's Rust tar extractor does not restore AppleDouble metadata.
+          COPYFILE_DISABLE=1 tar -czf "$archive" -C "$(dirname "$APP_PATH")" FyAgent.app
+          test -s "$archive"
+          # Extract and recheck the actual bytes that will be shipped.
+          extracted="$(mktemp -d "$RUNNER_TEMP/fyagent-updater-app.XXXXXX")"
+          trap 'rm -rf "$extracted"' EXIT
+          tar -xzf "$archive" -C "$extracted"
+          diff -qr "$APP_PATH" "$extracted/FyAgent.app"
+          scripts/release/verify-macos-signed-app.sh "$extracted/FyAgent.app"
+
+      - name: Upload immutable final macOS updater archive
+        id: updater-archive
+        if: needs.eligibility.outputs.release_mode == 'formal'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: updater-macos-archive
+          path: updater-archive/*
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Remove the temporary Developer ID keychain
         if: ${{ always() && needs.eligibility.outputs.release_mode == 'formal' }}
         shell: bash
@@ -1501,9 +1575,117 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  sign-updates-formal:
+    name: Sign final updater packages
+    if: ${{ !cancelled() && needs.eligibility.result == 'success' && needs.eligibility.outputs.release_mode == 'formal' && needs['build-macos'].result == 'success' && needs['pin-release-build-inputs'].result == 'success' && needs['seal-windows-formal'].result == 'success' }}
+    needs:
+      [eligibility, build-macos, pin-release-build-inputs, seal-windows-formal]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      APP_VERSION: ${{ needs.eligibility.outputs.app_version }}
+      SOURCE_SHA: ${{ needs.eligibility.outputs.source_sha }}
+      GENERATED_AT: ${{ needs.eligibility.outputs.generated_at }}
+    steps:
+      - name: Checkout immutable updater signing boundary
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.eligibility.outputs.source_sha }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          run_install: false
+
+      - name: Setup Node.js without caching
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
+      - name: Install locked signer CLI before loading any secret
+        run: pnpm install --frozen-lockfile
+
+      - name: Download independently sealed final Windows installers
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: installers-windows-*
+          path: updater-windows
+
+      - name: Download original final macOS archive by immutable artifact ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs['build-macos'].outputs.updater_archive_id }}
+          path: signed-updates
+
+      - name: Admit exact final updater inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          node --input-type=module <<'NODE'
+          import { assertExactFileSet, assertExactDirectorySet, expectedInstallerNames, updaterPackageNames } from './scripts/release/release-contract.mjs';
+          const version = process.env.APP_VERSION;
+          assertExactFileSet('signed-updates', [updaterPackageNames(version)[2]], 'final macOS updater archive');
+          assertExactDirectorySet('updater-windows', ['installers-windows-x64', 'installers-windows-arm64'], 'sealed updater Windows inputs');
+          for (const [index, arch] of [[1, 'x64'], [2, 'arm64']]) {
+            assertExactFileSet(`updater-windows/installers-windows-${arch}`, [expectedInstallerNames(version)[index]], 'sealed Windows updater input');
+          }
+          NODE
+          cp updater-windows/installers-windows-*/* signed-updates/
+
+      - name: Sign only the final bytes with the locked Tauri signer
+        shell: bash
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$TAURI_PRIVATE_KEY" && test -n "$TAURI_PRIVATE_KEY_PASSWORD"
+          for file in signed-updates/*; do
+            # signer uses TAURI_PRIVATE_KEY, unlike build's TAURI_SIGNING_PRIVATE_KEY.
+            # Suppress CLI output: only the explicit .sig files may leave this step.
+            if ! pnpm tauri signer sign "$file" >/dev/null 2>&1; then
+              echo "Updater signing failed for $(basename "$file") (CLI output suppressed)" >&2
+              exit 1
+            fi
+            test -s "$file.sig" || {
+              echo "Updater signature missing for $(basename "$file")" >&2
+              exit 1
+            }
+          done
+
+      - name: Verify signatures and create the GitHub updater manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://github.com/fy-agent/fyagent/releases/download/v${APP_VERSION}"
+          node scripts/release/updater-release.mjs create signed-updates "$APP_VERSION" "$base" "$GENERATED_AT" signed-updates/latest.json
+          node scripts/release/updater-release.mjs verify-local signed-updates "$APP_VERSION" "$base" "$GENERATED_AT"
+          # EXEs already belong to the sealed installer artifacts; retain only the five additions.
+          rm signed-updates/*-setup.exe
+          node --input-type=module <<'NODE'
+          import { assertExactFileSet, updaterArtifactNames } from './scripts/release/release-contract.mjs';
+          assertExactFileSet('signed-updates', updaterArtifactNames(process.env.APP_VERSION), 'formal updater outputs');
+          NODE
+
+      - name: Upload immutable signed updater additions
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-updater-additions
+          path: signed-updates/*
+          if-no-files-found: error
+          retention-days: 7
+
   verify-assets:
     name: Verify exact installers and generate evidence
-    if: ${{ always() && needs.eligibility.result == 'success' && needs['build-windows'].result == 'success' && needs['build-macos'].result == 'success' && needs['pin-release-build-inputs'].result == 'success' && ((github.event_name == 'workflow_dispatch' && needs.eligibility.outputs.release_mode == 'preflight' && needs['prove-windows-preflight'].result == 'success' && needs['sign-windows-formal'].result == 'skipped' && needs['seal-windows-formal'].result == 'skipped') || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.eligibility.outputs.release_mode == 'formal' && needs['prove-windows-preflight'].result == 'skipped' && needs['sign-windows-formal'].result == 'success' && needs['seal-windows-formal'].result == 'success')) }}
+    if: ${{ always() && needs.eligibility.result == 'success' && needs['build-windows'].result == 'success' && needs['build-macos'].result == 'success' && needs['pin-release-build-inputs'].result == 'success' && ((github.event_name == 'workflow_dispatch' && needs.eligibility.outputs.release_mode == 'preflight' && needs['prove-windows-preflight'].result == 'success' && needs['sign-windows-formal'].result == 'skipped' && needs['seal-windows-formal'].result == 'skipped' && needs['sign-updates-formal'].result == 'skipped') || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.eligibility.outputs.release_mode == 'formal' && needs['prove-windows-preflight'].result == 'skipped' && needs['sign-windows-formal'].result == 'success' && needs['seal-windows-formal'].result == 'success' && needs['sign-updates-formal'].result == 'success')) }}
     needs:
       [
         eligibility,
@@ -1513,6 +1695,7 @@ jobs:
         prove-windows-preflight,
         sign-windows-formal,
         seal-windows-formal,
+        sign-updates-formal,
       ]
     runs-on: ubuntu-24.04
     env:
@@ -1564,6 +1747,13 @@ jobs:
           pattern: signing-*
           path: downloaded-signing
 
+      - name: Download formal updater additions by immutable artifact ID
+        if: needs.eligibility.outputs.release_mode == 'formal'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs['sign-updates-formal'].outputs.artifact_id }}
+          path: downloaded-updates
+
       - name: Verify exact three installers and generate three machine-readable subjects
         shell: bash
         run: |
@@ -1597,9 +1787,14 @@ jobs:
             "$TRUSTED_WORKFLOW_SHA" \
             "$EXPECTED_CI_RUN_ID" "$EXPECTED_CI_RUN_ATTEMPT" "$GENERATED_AT" \
             verified-subjects/build-metadata.json
-          node scripts/release/verify-release-files.mjs subjects verified-subjects "$APP_VERSION"
+          if [ "$RELEASE_MODE" = formal ]; then
+            node scripts/release/collect-workflow-artifacts.mjs updates downloaded-updates updater-additions "$APP_VERSION"
+            cp updater-additions/* verified-subjects/
+            node scripts/release/updater-release.mjs verify-local verified-subjects "$APP_VERSION" "https://github.com/fy-agent/fyagent/releases/download/v${APP_VERSION}" "$GENERATED_AT"
+          fi
+          node scripts/release/verify-release-files.mjs subjects verified-subjects "$APP_VERSION" "$RELEASE_MODE"
 
-      - name: Upload the exact six attestation subjects
+      - name: Upload the exact mode-specific attestation subjects
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: verified-attestation-subjects
@@ -1608,7 +1803,7 @@ jobs:
           retention-days: 7
 
   attest:
-    name: Attest three installers and three evidence files
+    name: Attest exact mode-specific release subjects
     if: ${{ !cancelled() }}
     needs: [eligibility, verify-assets]
     runs-on: ubuntu-24.04
@@ -1619,6 +1814,7 @@ jobs:
       id-token: write
     env:
       APP_VERSION: ${{ needs.eligibility.outputs.app_version }}
+      RELEASE_MODE: ${{ needs.eligibility.outputs.release_mode }}
     steps:
       - name: Require successful attestation prerequisites
         shell: bash
@@ -1649,8 +1845,10 @@ jobs:
           name: verified-attestation-subjects
           path: verified-subjects
 
-      - name: Recheck the exact six subjects
-        run: node scripts/release/verify-release-files.mjs subjects verified-subjects "$APP_VERSION"
+      - name: Recheck the exact mode-specific subjects
+        run: |
+          set -euo pipefail
+          node scripts/release/verify-release-files.mjs subjects verified-subjects "$APP_VERSION" "$RELEASE_MODE"
 
       - name: Generate mandatory GitHub artifact attestation
         id: attest
@@ -1658,7 +1856,7 @@ jobs:
         with:
           subject-path: verified-subjects/*
 
-      - name: Assemble and verify exact seven Release attachments
+      - name: Assemble and verify exact mode-specific Release attachments
         shell: bash
         env:
           BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
@@ -1669,7 +1867,7 @@ jobs:
             exit 1
           }
           node scripts/release/prepare-release-publication.mjs assemble \
-            verified-subjects "$BUNDLE_PATH" release-attachments "$APP_VERSION"
+            verified-subjects "$BUNDLE_PATH" release-attachments "$APP_VERSION" "$RELEASE_MODE"
 
       - name: Upload exact Release transaction payload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1679,10 +1877,71 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  sync-update-mirror:
+    name: Synchronize and publicly verify updater mirror
+    if: ${{ !cancelled() && needs.eligibility.result == 'success' && needs.eligibility.outputs.release_mode == 'formal' && needs.eligibility.outputs.mirror_base_url != '' && needs.attest.result == 'success' }}
+    needs: [eligibility, attest]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      APP_VERSION: ${{ needs.eligibility.outputs.app_version }}
+      GENERATED_AT: ${{ needs.eligibility.outputs.generated_at }}
+      MIRROR_BASE_URL: ${{ needs.eligibility.outputs.mirror_base_url }}
+    steps:
+      - name: Checkout immutable mirror verification boundary
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.eligibility.outputs.source_sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Download attested Release transaction payload
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-attachments
+          path: release-attachments
+
+      - name: Verify exact mirror source and generate mirror URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws --version
+          node scripts/release/verify-release-files.mjs attachments release-attachments "$APP_VERSION" formal
+          node scripts/release/updater-release.mjs verify-local release-attachments "$APP_VERSION" "https://github.com/fy-agent/fyagent/releases/download/v${APP_VERSION}" "$GENERATED_AT"
+          node scripts/release/updater-release.mjs create release-attachments "$APP_VERSION" "$MIRROR_BASE_URL" "$GENERATED_AT" "$RUNNER_TEMP/mirror-latest.json"
+
+      - name: Upload mirror packages and signatures before latest manifest
+        shell: bash
+        env:
+          FYAGENT_UPDATE_MIRROR_S3_ENDPOINT: ${{ secrets.FYAGENT_UPDATE_MIRROR_S3_ENDPOINT }}
+          FYAGENT_UPDATE_MIRROR_S3_BUCKET: ${{ secrets.FYAGENT_UPDATE_MIRROR_S3_BUCKET }}
+          FYAGENT_UPDATE_MIRROR_S3_PREFIX: ${{ secrets.FYAGENT_UPDATE_MIRROR_S3_PREFIX }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.FYAGENT_UPDATE_MIRROR_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.FYAGENT_UPDATE_MIRROR_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: "true"
+          AWS_CONFIG_FILE: /dev/null
+          AWS_SHARED_CREDENTIALS_FILE: /dev/null
+        run: |
+          set -euo pipefail
+          node scripts/release/sync-updater-mirror.mjs release-attachments "$APP_VERSION" "$RUNNER_TEMP/mirror-latest.json"
+
+      - name: Require public mirror manifest signatures and payload SHA-256 readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/release/updater-release.mjs readback release-attachments "$APP_VERSION" "$MIRROR_BASE_URL" "$GENERATED_AT" "$MIRROR_BASE_URL/latest.json"
+          printf '国内镜像已同步并通过公开回读校验。\n' >> "$GITHUB_STEP_SUMMARY"
+
   publish:
     name: Publish stable GitHub Release
-    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.eligibility.result == 'success' && needs.eligibility.outputs.release_mode == 'formal' && needs.attest.result == 'success' }}
-    needs: [eligibility, attest]
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.eligibility.result == 'success' && needs.eligibility.outputs.release_mode == 'formal' && needs.attest.result == 'success' && ((needs.eligibility.outputs.mirror_base_url == '' && needs['sync-update-mirror'].result == 'skipped') || (needs.eligibility.outputs.mirror_base_url != '' && needs['sync-update-mirror'].result == 'success')) }}
+    needs: [eligibility, attest, sync-update-mirror]
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -1690,6 +1949,8 @@ jobs:
       contents: write
     env:
       APP_VERSION: ${{ needs.eligibility.outputs.app_version }}
+      GENERATED_AT: ${{ needs.eligibility.outputs.generated_at }}
+      MIRROR_BASE_URL: ${{ needs.eligibility.outputs.mirror_base_url }}
       RELEASE_APP_VERSION: ${{ needs.eligibility.outputs.app_version }}
       RELEASE_TAG: ${{ needs.eligibility.outputs.release_tag }}
       SOURCE_SHA: ${{ needs.eligibility.outputs.source_sha }}
@@ -1714,6 +1975,14 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+
+      - name: Report updater mirror configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$MIRROR_BASE_URL" ]; then
+            printf '未配置镜像：本次应用仅使用 GitHub 更新地址。\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Revalidate frozen main release eligibility at publish start
         shell: bash
@@ -1767,7 +2036,7 @@ jobs:
           [ "$RELEASE_TAG" = "v$APP_VERSION" ]
           [ "$(git rev-parse HEAD)" = "$SOURCE_SHA" ]
           [ "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$SOURCE_SHA" ]
-          node scripts/release/verify-release-files.mjs attachments release-attachments "$APP_VERSION"
+          node scripts/release/verify-release-files.mjs attachments release-attachments "$APP_VERSION" formal
           jq -e --arg version "$APP_VERSION" --arg source "$SOURCE_SHA" '
             .schema == "fyagent-windows-signing-status/v1" and
             .product == "FyAgent" and .version == $version and .sourceSha == $source and
@@ -1778,6 +2047,7 @@ jobs:
               "FyAgent-" + $version + "-Windows-x64-setup.exe"
             ] | sort)
           ' release-attachments/signing-status.json >/dev/null
+          node scripts/release/updater-release.mjs verify-local release-attachments "$APP_VERSION" "https://github.com/fy-agent/fyagent/releases/download/v${APP_VERSION}" "$GENERATED_AT"
           release_notes_path="docs/release-notes/${RELEASE_TAG}-en.md"
           [ -s "$release_notes_path" ] || {
             echo "English $RELEASE_TAG Release Notes are missing" >&2
@@ -2013,7 +2283,7 @@ jobs:
           upload_base="$uploads_root/repos/$repository/releases/$draft_id/assets"
           local_attachments="$transaction_root/local-attachments.json"
           node scripts/release/prepare-release-publication.mjs list \
-            release-attachments "$APP_VERSION" > "$local_attachments"
+            release-attachments "$APP_VERSION" formal > "$local_attachments"
           while IFS=$'\t' read -r asset_path asset_name asset_size; do
             upload_json="$transaction_root/upload-$asset_name.json"
             upload_status="$(curl --silent --show-error \
@@ -2039,9 +2309,9 @@ jobs:
             "$api_root/repos/$repository/releases/$draft_id/assets?per_page=100")"
           [ "$assets_status" = 200 ]
           jq -e '
-            length == 7 and
-            (map(.id) | unique | length) == 7 and
-            (map(.name) | unique | length) == 7 and
+            length == 12 and
+            (map(.id) | unique | length) == 12 and
+            (map(.name) | unique | length) == 12 and
             all(.state == "uploaded" and .size > 0)
           ' "$assets_json" >/dev/null
 
@@ -2069,7 +2339,7 @@ jobs:
 
             if [ "$download_failed" = false ] &&
               node scripts/release/prepare-release-publication.mjs verify-downloads \
-                release-attachments "$remote_root" "$APP_VERSION"; then
+                release-attachments "$remote_root" "$APP_VERSION" formal; then
               downloads_verified=true
               break
             fi
@@ -2130,7 +2400,7 @@ jobs:
             '.id == $id and .draft == false and .prerelease == false and
              .tag_name == $tag and
              .name == ("FyAgent " + $tag) and .body == $body and
-             (.published_at | type) == "string" and (.assets | length) == 7' \
+             (.published_at | type) == "string" and (.assets | length) == 12' \
             "$published_json" >/dev/null
 
           published_confirm_json="$transaction_root/published-confirmed.json"
@@ -2160,5 +2430,8 @@ jobs:
           [ "$latest_status" = 200 ]
           jq -e --argjson id "$draft_id" '.id == $id and .draft == false and .prerelease == false' \
             "$latest_json" >/dev/null
+          node scripts/release/updater-release.mjs readback release-attachments "$APP_VERSION" \
+            "https://github.com/fy-agent/fyagent/releases/download/v${APP_VERSION}" "$GENERATED_AT" \
+            'https://github.com/fy-agent/fyagent/releases/latest/download/latest.json'
           draft_created=false
           publish_attempted=false

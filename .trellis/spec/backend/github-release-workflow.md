@@ -244,6 +244,14 @@ The preflight and formal Windows paths are mutually exclusive:
   skipped, or the formal fresh seal only when the preflight proof was skipped.
   It also requires every native build and the immutable input pin to succeed
   before aggregating the exact installer and evidence sets.
+- `sign-updates-formal` runs only after the immutable pin, final macOS build,
+  and fresh Windows formal seal succeed. Only its signing step receives Tauri
+  private-key values. It signs final EXEs and the complete notarized/stapled
+  macOS app archive with the locked CLI; it never signs during `tauri build`.
+  The archive and updater additions travel by original immutable artifact IDs.
+  Secret-free aggregation rechecks key IDs and Ed25519/BLAKE2b signatures
+  against the actual final package bytes before attestation. Preflight requires
+  this job to be skipped and retains its original evidence set.
 - `attest` declares an explicit non-cancellation status condition so the
   intentionally skipped half of the mutually exclusive Windows topology does
   not trigger GitHub Actions' implicit success-only dependency propagation.
@@ -255,6 +263,12 @@ The preflight and formal Windows paths are mutually exclusive:
   direct needs. A preflight dispatch still skips publication; a formal dispatch
   at the exact tag ref follows the same formal signing/sealing/publication path
   as a tag push.
+  With a configured mirror it additionally requires `sync-update-mirror`
+  success; without a mirror that dependency must be skipped. The mirror job
+  consumes attested attachments, uploads payloads/signatures before its static
+  manifest, and requires public manifest/signature/URL and SHA-256 readback.
+  It runs before the GitHub draft transaction and receives no GitHub write
+  permissions. S3 credential values exist only in its upload step.
 
 The Release workflow deliberately has no job that launches a Windows setup
 executable or performs install -> verify -> uninstall. Successful matching
@@ -435,7 +449,7 @@ FyAgent-X.Y.Z-Windows-arm64-setup.exe
 ```
 
 Any Windows format other than the two NSIS setup executables, any macOS
-format other than the versioned DMG, plus v-prefixed
+installer format other than the versioned DMG, plus v-prefixed
 filenames, unversioned names, architecture aliases, missing files, extras,
 directories, symlinks, empty files, or overwrites is forbidden.
 
@@ -463,10 +477,40 @@ are not Authenticode signed and still list SHA-256, source SHA, and
 attestation. Signed mode reports the verified public certificate policy; no
 credential or adapter secret is included.
 
-Attestation subjects are the three installers plus `download-manifest.json`,
-`build-metadata.json`, and `signing-status.json` (six subjects). The
-Sigstore bundle is copied to `artifact-attestation.sigstore.json`; it is the
-seventh Release attachment and does not attest itself.
+Preflight attestation subjects are the three installers plus
+`download-manifest.json`, `build-metadata.json`, and `signing-status.json`
+(six subjects). Formal adds both EXE `.sig` files,
+`FyAgent-X.Y.Z-macOS-universal.app.tar.gz`, its `.sig`, and `latest.json`
+(eleven subjects). The Sigstore bundle is copied to
+`artifact-attestation.sigstore.json`; it does not attest itself. The exact
+Release attachment count is seven for preflight workflow payloads and twelve
+for formal. All collectors, verifiers and publication helpers preserve exact
+file-set equality, never subset or extension-only admission.
+
+`scripts/release/updater-manifest.mjs` owns the pure Tauri v2 static manifest
+contract: exact version/notes/pub_date/platforms, four supported platform keys,
+exact `.sig` contents, canonical HTTPS URLs and matching minisign key IDs.
+Formal eligibility rejects test key ID `B24D446F5B80F951`, disabled-signing
+config drift and missing signing secrets before any native build. Eligibility
+receives presence booleans only. `bundle.createUpdaterArtifacts` remains false.
+The signer CLI uses `TAURI_PRIVATE_KEY` and `TAURI_PRIVATE_KEY_PASSWORD`,
+mapped from the required repository signing secrets. No private material is
+written to disk or uploaded; CLI output is suppressed.
+macOS archives contain one top-level `FyAgent.app`; AppleDouble metadata
+generation is disabled because the updater uses Rust tar extraction. The
+extracted app must retain the exact bytes, valid code signature and stapled
+ticket before archive upload. A published same-tag Release is rejected in
+eligibility before any mirror side effects.
+
+`vars.FYAGENT_UPDATE_MIRROR_BASE_URL` is validated and frozen in eligibility;
+formal native compilation embeds BASE_URL + `/latest.json` only when nonempty.
+An empty value skips synchronization and emits an explicit unconfigured-mirror
+summary. A nonempty value requires all S3 endpoint/bucket/access credentials;
+the prefix alone may be empty. Upload uses hosted-runner AWS CLI with explicit
+endpoint, environment credentials and no persisted credentials. Public curl
+readback forces HTTPS including redirects, bypasses caches, bounds connection
+and transfer time, and retries the full proof at most four times. A stale or
+invalid manifest, signature/URL mismatch, corrupt package or sig file fails.
 
 ## 8. Permissions and publication transaction
 
@@ -490,7 +534,7 @@ equivalent publication entry events; preflight dispatch evaluates to false.
 It performs this transaction:
 
 1. re-evaluate live remote eligibility against the frozen identity;
-2. require the exact seven attachments and dynamic English notes file
+2. require the exact twelve formal attachments and dynamic English notes file
    `docs/release-notes/${RELEASE_TAG}-en.md`;
 3. generate the signing disclosure from verified metadata;
 4. list all Releases, including drafts. More than one Release for the tag is a
@@ -504,7 +548,18 @@ It performs this transaction:
    eligibility against the same frozen output immediately before publication;
 8. issue one PATCH to `draft=false`, `prerelease=false`, `make_latest=true`;
 9. re-read by Release ID, verify exact published identity/asset IDs, and
-   independently confirm it is Latest.
+   independently confirm it is Latest; then publicly read back
+   `releases/latest/download/latest.json`, require this run's frozen version,
+   signatures and canonical versioned URLs, and hash all updater packages.
+   Failure marks the job failed and reports the published state; it does not
+   undo an already public Release.
+
+Mirror-first ordering is required because a successful stale mirror response
+does not fall back to GitHub. Mirror failure must block GitHub publication.
+If the later GitHub transaction fails, mirror users may already see the new
+version; no automatic mirror rollback is allowed. Operational configuration,
+first-formal live checks, and the cross-store failure boundary are documented
+in `docs/fyagent/app-update-maintenance.md`.
 
 ### Owned draft recovery protocol
 
@@ -597,7 +652,7 @@ until the Release is again provably an owned private draft.
 | Apple status is still non-terminal after `FYAGENT_NOTARY_WAIT_SECONDS` (default 18000)                                  | Fail with the submission id and last status; do not start a second Apple upload.                     |
 | Windows proof/sealed binding or macOS identity fails                                                                    | Stop aggregation and publication.                                                                    |
 | An intentional producer skip propagates past successful asset verification                                              | Attestation still runs; abnormal direct needs fail visibly.                                          |
-| Three/six/seven file allowlist or digest differs                                                                        | Stop verification, attestation, or publication.                                                      |
+| Installer or mode-specific subject/attachment allowlist or digest differs                                               | Stop verification, attestation, mirror synchronization, or publication.                              |
 | `CHANGELOG.md` first version heading is missing, empty, or not Cargo `X.Y.Z`                                            | `mise run release:check` fails before tag/publication.                                               |
 | Styled DMG layout write fails, or final attach lacks `.DS_Store` / background / Applications symlink                    | Fail `build-macos`; do not publish an unstyled DMG.                                                  |
 | Live main identity changes during the transaction                                                                       | Continue; tag target SHA remains the frozen source.                                                  |

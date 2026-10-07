@@ -153,8 +153,16 @@ export function assertReleaseIdentity(identity: {
   sourceSha: string;
 }): void;
 export function expectedInstallerNames(version: string): string[];
-export function expectedAttestationSubjectNames(version: string): string[];
-export function expectedReleaseAttachmentNames(version: string): string[];
+export function updaterPackageNames(version: string): string[];
+export function updaterArtifactNames(version: string): string[];
+export function expectedAttestationSubjectNames(
+  version: string,
+  mode?: "formal" | "preflight",
+): string[];
+export function expectedReleaseAttachmentNames(
+  version: string,
+  mode?: "formal" | "preflight",
+): string[];
 export function assertExactFileSet(
   directory: string,
   expectedNames: readonly string[],
