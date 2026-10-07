@@ -70,7 +70,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .fy-about-star-icon {
-    animation: fy-star-spin 6s linear infinite;
+    animation: fy-star-spin var(--fy-motion-star-spin) linear infinite;
   }
 }
 

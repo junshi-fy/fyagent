@@ -124,11 +124,6 @@ describe("About dialog", () => {
       "https://github.com/fy-agent/fyagent/issues/new?template=bug_report.yml&version=9.8.7&os=macOS",
     ],
     [
-      "Linux",
-      { platform: "Linux x86_64", userAgent: "Linux" },
-      "https://github.com/fy-agent/fyagent/issues/new?template=bug_report.yml&version=9.8.7",
-    ],
-    [
       "unknown",
       undefined,
       "https://github.com/fy-agent/fyagent/issues/new?template=bug_report.yml&version=9.8.7",

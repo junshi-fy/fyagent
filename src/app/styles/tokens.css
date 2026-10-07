@@ -100,6 +100,7 @@
   --fy-motion-theme-ease: cubic-bezier(0.25, 0.08, 0.25, 1);
   --fy-motion-spinner: 900ms;
   --fy-motion-spinner-reduced: 1800ms;
+  --fy-motion-star-spin: 6s;
   --fy-motion-ease: cubic-bezier(0.32, 0.72, 0, 1);
   --fy-dialog-surface: rgba(237, 246, 253, 0.74);
   --fy-surface-opaque: #e8f1f8;
