@@ -171,7 +171,7 @@
     ],
     [
       "src-tauri/src/lib.rs",
-      "2d15ac7411f371c458a0c0bc3296388b6c44b2e403837d9573ce88fa9788a82a"
+      "04c9c8d377b95f520a3670bbc1d79490cd0e837bd74b6634272f15feab421a81"
     ],
     [
       "src-tauri/src/lightweight.rs",
@@ -383,7 +383,7 @@
     ],
     [
       "src-tauri/src/settings.rs",
-      "721d224a40efc77ad649745472e8b6c6158e16bf5fc5ea73571c0ee7988f9ffe"
+      "4893cfaf63e4d6c71bca11e7454f9ea111e7bf24cb0bea2a086d05741f5a921b"
     ],
     [
       "src-tauri/src/tray.rs",
@@ -451,7 +451,7 @@
     ],
     [
       "tests/architecture/rustModuleBoundaries.test.ts",
-      "768aa8676416515561053298c2f606858c1fc7a5e31fd8c88f59567c66b79694"
+      "aa156d369dfdf1dcbf60a8d5fa937c7576db7476449be81632444567eb7214a1"
     ],
     [
       "tests/codexUserHelperContract.test.ts",
@@ -459,7 +459,7 @@
     ],
     [
       "tests/codexWindowsUserScopeContract.test.ts",
-      "dfebb5eda13f7b115d83c9e0df681812967f212b93dbd9647ed049a2a7b113c1"
+      "d58b538143af0c26b9326c71ebc1d9e14e563eb82020b715ec43bcf160fe6ea7"
     ],
     [
       "tests/hdiutilRetry.test.ts",

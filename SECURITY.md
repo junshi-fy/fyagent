@@ -71,7 +71,7 @@ Inputs that genuinely cross a trust boundary:
 
 - `fyagent://` deep link payloads / deeplink 载荷（由第三方构造，经浏览器抵达）
 - **Inbound requests to the local HTTP proxy**, including from other hosts when it is configured to bind a non-loopback address / **抵达本地 HTTP 代理的入站请求**，包括配置为绑定非 loopback 地址时来自其他主机的请求
-- Remote sync payloads restored from WebDAV / S3 / 从 WebDAV、S3 还原的同步数据
+- Remote sync payloads restored from WebDAV / S3 / 从 WebDAV、S3 还原的同步数据 — Cloud sync has been retired; legacy configuration is retained but no longer used. / 云同步已退役，旧配置保留但不再使用。
 - Imported files: SQL import/export, provider and MCP config import / 导入文件：SQL 导入导出、供应商与 MCP 配置导入
 - Upstream API responses processed by the local proxy (`src-tauri/src/proxy/`) / 本地代理处理的上游 API 响应
 - Remote data rendered or acted upon by the renderer (model pricing, avatars) / 渲染进程展示或据以行动的远程数据（模型定价、头像）

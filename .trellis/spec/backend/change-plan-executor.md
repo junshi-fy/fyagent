@@ -207,7 +207,8 @@ faultPoints        = before_managed_write,
   a Provider was persisted.
 - SecretRef integration is separate. A secret-blocked target fails closed
   before admission/writer invocation.
-- WebDAV continues to skip and locally preserve all three Change Plan tables.
+- Cloud sync is retired; legacy skip/preserve coverage for all three Change
+  Plan tables remains test-only.
 
 ## 4. Validation & Error Matrix
 

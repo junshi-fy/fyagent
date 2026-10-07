@@ -208,7 +208,8 @@ CODEX_WEBSOCKET_PROXY_MAY_BE_UNSUPPORTED
   that executor.
 - Schema 20 owns local-only `change_plans`, `change_jobs`, and append-only
   `change_job_events`. Fresh creation and v19 migration call the same
-  idempotent table helper; WebDAV sync skips and locally preserves all three.
+  idempotent table helper. Retired cloud sync skip/preserve coverage for all
+  three remains test-only.
 - `create_codex_provider_switch_plan` runs under the existing Provider mutation
   guard, reads DB/device/live baselines, and writes only the credential-free
   ledger. It performs no Provider mutation or network request. The plan expires

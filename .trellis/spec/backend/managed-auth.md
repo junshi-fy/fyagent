@@ -17,7 +17,7 @@ Related owners:
 
 - [SecretRef Native Backend](./secretref-backend.md) owns the OS vault leaf.
 - [Database Persistence](./database-persistence.md) owns schema/migration
-  mechanics and the WebDAV skip/preserve sets.
+  mechanics and the test-only legacy cloud skip/preserve sets.
 - [Managed Accounts](../frontend/managed-auth.md) owns renderer Ports.
 - [External Agent Auth](./external-agent-auth.md) remains the Agent-owned
   Claude/desktop handoff façade; it must not grow a second OAuth store.
@@ -330,7 +330,8 @@ mutation IPC or create another account authority.
 
 ### Sync and export
 
-`managed_auth_*` tables are local-only in the WebDAV skip/preserve sets.
+Cloud sync is retired. Test-only legacy skip/preserve sets retain coverage
+for all `managed_auth_*` tables.
 Opaque SecretRef values are device-bound; syncing them to another machine
 must not be treated as a portable login. Full SQL export may include
 metadata and must never include token columns.
@@ -396,7 +397,7 @@ Required assertions:
 
 - schema v20→v21 creates the five tables; future `SCHEMA_VERSION+1` fails
   closed; CHECK excludes `shared`; no token columns;
-- WebDAV skip/preserve include all `managed_auth_*` tables together;
+- test-only legacy skip/preserve sets include all `managed_auth_*` tables together;
 - bundle 7.2 round-trip, wrong schema rejected, oversized fail-closed,
   OpenAI-sized grants omit `idToken` to fit 2560;
   Debug redaction;

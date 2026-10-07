@@ -42,7 +42,7 @@ secret handling, native source checks, and residual-risk reporting.
 | [Supported-Platform Governance](./supported-platform-governance.md)          | Platform-sensitive source/raster identities, one-snapshot repository scans, and fail-closed review seals.                       |
 | [Repository Root and Tool Configuration](./repository-layout.md)             | Root discovery exceptions, explicit config locations, cwd/alias invariants and placement verification.                          |
 | [Database Persistence](./database-persistence.md)                            | SQLite path, schema version, startup lifecycle, migrations, import/backup/restore, DAO placement, and transactional boundaries. |
-| [Automatic Cloud Sync Scheduling](./auto-sync.md)                            | Injected database hints, independent S3/WebDAV workers, bounded debounce, suppression, and upload lifecycle.                    |
+| [Retired Cloud Sync](./auto-sync.md)                            | Retirement boundary, opaque legacy settings preservation, and command/worker removal.                    |
 | [Application Identity](./application-identity.md)                            | Product names, identifiers, license/provenance identity, and migration boundaries.                                              |
 | [Application Brand Assets](./application-brand-assets.md)                    | Canonical icons, asset derivation, platform packaging, and byte-level validation.                                               |
 | [Application Version and Installer Assets](./fyagent-version-contract.md)    | Canonical version source, package versions, and installer filename contract.                                                    |

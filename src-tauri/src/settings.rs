@@ -89,206 +89,6 @@ impl VisibleApps {
     }
 }
 
-/// WebDAV 同步状态（持久化同步进度信息）
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct WebDavSyncStatus {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_sync_at: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_error: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_error_source: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_remote_etag: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_local_manifest_hash: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_remote_manifest_hash: Option<String>,
-}
-
-fn default_remote_root() -> String {
-    "fyagent-sync".to_string()
-}
-fn default_profile() -> String {
-    "default".to_string()
-}
-
-/// WebDAV 同步设置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebDavSyncSettings {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub auto_sync: bool,
-    #[serde(default)]
-    pub base_url: String,
-    #[serde(default)]
-    pub username: String,
-    #[serde(default)]
-    pub password: String,
-    #[serde(default = "default_remote_root")]
-    pub remote_root: String,
-    #[serde(default = "default_profile")]
-    pub profile: String,
-    #[serde(default)]
-    pub status: WebDavSyncStatus,
-}
-
-impl Default for WebDavSyncSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            auto_sync: false,
-            base_url: String::new(),
-            username: String::new(),
-            password: String::new(),
-            remote_root: default_remote_root(),
-            profile: default_profile(),
-            status: WebDavSyncStatus::default(),
-        }
-    }
-}
-
-impl WebDavSyncSettings {
-    pub fn validate(&self) -> Result<(), crate::error::AppError> {
-        if self.base_url.trim().is_empty() {
-            return Err(crate::error::AppError::localized(
-                "webdav.base_url.required",
-                "WebDAV 地址不能为空",
-                "WebDAV URL is required.",
-            ));
-        }
-        if self.username.trim().is_empty() {
-            return Err(crate::error::AppError::localized(
-                "webdav.username.required",
-                "WebDAV 用户名不能为空",
-                "WebDAV username is required.",
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn normalize(&mut self) {
-        self.base_url = self.base_url.trim().to_string();
-        self.username = self.username.trim().to_string();
-        self.remote_root = self.remote_root.trim().to_string();
-        self.profile = self.profile.trim().to_string();
-        if self.remote_root.is_empty() {
-            self.remote_root = default_remote_root();
-        }
-        if self.profile.is_empty() {
-            self.profile = default_profile();
-        }
-    }
-
-    /// Returns true if all credential fields are blank (no config to persist).
-    fn is_empty(&self) -> bool {
-        self.base_url.is_empty() && self.username.is_empty() && self.password.is_empty()
-    }
-}
-
-/// S3 同步设置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct S3SyncSettings {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub auto_sync: bool,
-    #[serde(default)]
-    pub region: String,
-    #[serde(default)]
-    pub bucket: String,
-    #[serde(default)]
-    pub access_key_id: String,
-    #[serde(default)]
-    pub secret_access_key: String,
-    #[serde(default)]
-    pub endpoint: String,
-    #[serde(default = "default_remote_root")]
-    pub remote_root: String,
-    #[serde(default = "default_profile")]
-    pub profile: String,
-    #[serde(default)]
-    pub status: WebDavSyncStatus,
-}
-
-impl Default for S3SyncSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            auto_sync: false,
-            region: String::new(),
-            bucket: String::new(),
-            access_key_id: String::new(),
-            secret_access_key: String::new(),
-            endpoint: String::new(),
-            remote_root: default_remote_root(),
-            profile: default_profile(),
-            status: WebDavSyncStatus::default(),
-        }
-    }
-}
-
-impl S3SyncSettings {
-    pub fn validate(&self) -> Result<(), crate::error::AppError> {
-        if self.bucket.trim().is_empty() {
-            return Err(crate::error::AppError::localized(
-                "s3.bucket.required",
-                "S3 存储桶不能为空",
-                "S3 bucket is required.",
-            ));
-        }
-        if self.region.trim().is_empty() {
-            return Err(crate::error::AppError::localized(
-                "s3.region.required",
-                "S3 区域不能为空",
-                "S3 region is required.",
-            ));
-        }
-        if self.access_key_id.trim().is_empty() {
-            return Err(crate::error::AppError::localized(
-                "s3.access_key_id.required",
-                "S3 Access Key ID 不能为空",
-                "S3 Access Key ID is required.",
-            ));
-        }
-        if self.secret_access_key.trim().is_empty() {
-            return Err(crate::error::AppError::localized(
-                "s3.secret_access_key.required",
-                "S3 Secret Access Key 不能为空",
-                "S3 Secret Access Key is required.",
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn normalize(&mut self) {
-        self.region = self.region.trim().to_string();
-        self.bucket = self.bucket.trim().to_string();
-        self.access_key_id = self.access_key_id.trim().to_string();
-        self.endpoint = self.endpoint.trim().to_string();
-        self.remote_root = self.remote_root.trim().to_string();
-        self.profile = self.profile.trim().to_string();
-        if self.remote_root.is_empty() {
-            self.remote_root = default_remote_root();
-        }
-        if self.profile.is_empty() {
-            self.profile = default_profile();
-        }
-    }
-
-    /// Returns true if all credential fields are blank (no config to persist).
-    fn is_empty(&self) -> bool {
-        self.bucket.is_empty()
-            && self.region.is_empty()
-            && self.access_key_id.is_empty()
-            && self.secret_access_key.is_empty()
-    }
-}
-
 /// 本机自动迁移状态。
 ///
 /// 这里记录的是本机启动时执行过的一次性迁移；标记不随数据库同步。
@@ -473,13 +273,12 @@ pub struct AppSettings {
     #[serde(default)]
     pub skill_storage_location: SkillStorageLocation,
 
-    // ===== WebDAV 同步设置 =====
+    // Retired cloud settings are opaque disk-only values; never inspect or normalize them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub webdav_sync: Option<WebDavSyncSettings>,
+    pub webdav_sync: Option<serde_json::Value>,
 
-    // ===== S3 同步设置 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub s3_sync: Option<S3SyncSettings>,
+    pub s3_sync: Option<serde_json::Value>,
 
     // ===== WebDAV 备份设置（旧版，保留向后兼容）=====
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -712,20 +511,6 @@ impl AppSettings {
             .and_then(parse_appearance_theme)
             .map(str::to_string);
 
-        if let Some(sync) = &mut self.webdav_sync {
-            sync.normalize();
-            if sync.is_empty() {
-                self.webdav_sync = None;
-            }
-        }
-
-        if let Some(s3) = &mut self.s3_sync {
-            s3.normalize();
-            if s3.is_empty() {
-                self.s3_sync = None;
-            }
-        }
-
         self.preferred_terminal = normalize_preferred_terminal(self.preferred_terminal.as_deref());
     }
 
@@ -827,12 +612,8 @@ pub fn get_settings() -> AppSettings {
 
 pub fn get_settings_for_frontend() -> AppSettings {
     let mut settings = get_settings();
-    if let Some(sync) = &mut settings.webdav_sync {
-        sync.password.clear();
-    }
-    if let Some(s3) = &mut settings.s3_sync {
-        s3.secret_access_key.clear();
-    }
+    settings.webdav_sync = None;
+    settings.s3_sync = None;
     settings.webdav_backup = None;
     settings
 }
@@ -1267,53 +1048,85 @@ pub fn get_preferred_terminal() -> Option<String> {
     effective_preferred_terminal(preferred_terminal.as_deref())
 }
 
-// ===== WebDAV 同步设置管理函数 =====
-
-/// 获取 WebDAV 同步设置
-pub fn get_webdav_sync_settings() -> Option<WebDavSyncSettings> {
-    settings_store().read().ok()?.webdav_sync.clone()
-}
-
-/// 保存 WebDAV 同步设置
-pub fn set_webdav_sync_settings(settings: Option<WebDavSyncSettings>) -> Result<(), AppError> {
-    mutate_settings(|current| {
-        current.webdav_sync = settings;
-    })
-}
-
-/// 仅更新 WebDAV 同步状态，避免覆写 credentials/root/profile 等字段
-pub fn update_webdav_sync_status(status: WebDavSyncStatus) -> Result<(), AppError> {
-    mutate_settings(|current| {
-        if let Some(sync) = current.webdav_sync.as_mut() {
-            sync.status = status;
-        }
-    })
-}
-
-// ===== S3 同步设置管理函数 =====
-
-pub fn get_s3_sync_settings() -> Option<S3SyncSettings> {
-    settings_store().read().ok()?.s3_sync.clone()
-}
-
-pub fn set_s3_sync_settings(settings: Option<S3SyncSettings>) -> Result<(), AppError> {
-    mutate_settings(|current| {
-        current.s3_sync = settings;
-    })
-}
-
-pub fn update_s3_sync_status(status: WebDavSyncStatus) -> Result<(), AppError> {
-    mutate_settings(|current| {
-        if let Some(s3) = current.s3_sync.as_mut() {
-            s3.status = status;
-        }
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::app_config::AppType;
+
+    #[test]
+    fn retired_cloud_settings_round_trip_without_interpreting_or_normalizing_values() {
+        let legacy = serde_json::json!({
+            "webdavSync": {
+                "enabled": true, "autoSync": true,
+                "baseUrl": " https://dav.example.com ",
+                "username": " alice ", "password": " secret ",
+                "remoteRoot": "", "profile": "",
+                "status": {"lastError": "old error", "unknown": null},
+                "unknown": [1, {"future": true}]
+            },
+            "s3Sync": {
+                "enabled": true, "autoSync": true,
+                "bucket": " bucket ", "accessKeyId": "ak",
+                "secretAccessKey": " secret ",
+                "remoteRoot": "", "profile": "",
+                "unknown": [false, null]
+            },
+            "webdavBackup": {"username": "old-user", "password": "old-secret"}
+        });
+        let mut value = serde_json::to_value(AppSettings::default()).expect("default settings");
+        for key in ["webdavSync", "s3Sync", "webdavBackup"] {
+            value[key] = legacy[key].clone();
+        }
+        let mut settings = AppSettings::from_json(&value.to_string()).expect("legacy settings");
+        // Ordinary load and save both normalize settings; cloud values must survive both.
+        settings.normalize_paths();
+        let serialized = serde_json::to_value(settings).expect("serialized settings");
+        for key in ["webdavSync", "s3Sync", "webdavBackup"] {
+            assert_eq!(serialized.get(key), legacy.get(key), "{key}");
+        }
+
+        // These values are opaque JSON, not required to match the retired DTOs.
+        value["webdavSync"] = serde_json::json!(["legacy", {"enabled": "unknown"}]);
+        value["s3Sync"] = serde_json::json!("legacy-value");
+        let settings = AppSettings::from_json(&value.to_string()).expect("opaque settings");
+        let serialized = serde_json::to_value(settings).expect("serialized opaque settings");
+        assert_eq!(serialized.get("webdavSync"), value.get("webdavSync"));
+        assert_eq!(serialized.get("s3Sync"), value.get("s3Sync"));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn frontend_settings_omit_retired_cloud_settings_without_changing_stored_values() {
+        struct RestoreSettings(AppSettings);
+        impl Drop for RestoreSettings {
+            fn drop(&mut self) {
+                *settings_store().write().unwrap() = self.0.clone();
+            }
+        }
+        let legacy = AppSettings {
+            webdav_sync: Some(serde_json::json!({
+                "enabled": true, "autoSync": true, "password": "secret"
+            })),
+            s3_sync: Some(serde_json::json!({
+                "enabled": true, "autoSync": true, "secretAccessKey": "secret"
+            })),
+            webdav_backup: Some(serde_json::json!({"password": "old-secret"})),
+            ..AppSettings::default()
+        };
+        let _restore = {
+            let mut stored = settings_store().write().unwrap();
+            RestoreSettings(std::mem::replace(&mut *stored, legacy.clone()))
+        };
+        let serialized =
+            serde_json::to_value(get_settings_for_frontend()).expect("frontend settings");
+        for key in ["webdavSync", "s3Sync", "webdavBackup"] {
+            assert!(serialized.get(key).is_none(), "{key}");
+        }
+        let stored = get_settings();
+        assert_eq!(stored.webdav_sync, legacy.webdav_sync);
+        assert_eq!(stored.s3_sync, legacy.s3_sync);
+        assert_eq!(stored.webdav_backup, legacy.webdav_backup);
+    }
 
     #[test]
     fn retired_window_control_setting_is_ignored_and_not_serialized() {

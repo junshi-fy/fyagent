@@ -47,7 +47,7 @@ pub use dao::Profile;
 
 use crate::config::get_app_config_dir;
 use crate::error::AppError;
-use rusqlite::{hooks::Action, Connection};
+use rusqlite::Connection;
 use serde::Serialize;
 use std::sync::Mutex;
 
@@ -89,26 +89,6 @@ pub struct Database {
 }
 
 impl Database {
-    /// Install the composition root's nonblocking change listener.
-    /// This is a dirty hint, not a commit notification; never reenter this DB in the callback.
-    pub(crate) fn set_change_listener(
-        &self,
-        listener: impl Fn(&str) + Send + 'static,
-    ) -> Result<(), AppError> {
-        let conn = lock_conn!(self.conn);
-        conn.update_hook(Some(
-            move |action: Action, _database: &str, table: &str, _row_id: i64| {
-                if matches!(
-                    action,
-                    Action::SQLITE_INSERT | Action::SQLITE_UPDATE | Action::SQLITE_DELETE
-                ) {
-                    listener(table);
-                }
-            },
-        ));
-        Ok(())
-    }
-
     /// 初始化数据库连接并创建表
     ///
     /// 数据库文件位于 `~/.fyagent/fyagent.db`

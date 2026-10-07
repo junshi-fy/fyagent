@@ -29,8 +29,6 @@ Important entry points are:
 ```text
 Database::init() -> Result<Database, AppError>
 Database::memory() -> Result<Database, AppError>
-Database::set_change_listener(listener: impl Fn(&str) + Send + 'static)
-  -> Result<(), AppError> // crate-private; composition-root wiring
 Database::stored_user_version_exceeds_supported(path)
   -> Result<Option<i32>, AppError>
 
@@ -130,19 +128,14 @@ bindings together with their full route. Private binary backups stay lossless.
   and common configuration. Dry-run uses an in-memory database with current
   schema compatibility checks and performs no application-file write.
 
-### DAO and change notification
+### DAO boundaries
 
 - Multi-row or cross-table invariants are committed in one transaction. A
   caller must not reproduce DAO SQL in a command/service to gain a second
   mutation path.
-- Insert, update, and delete hooks invoke the connection-local listener injected
-  by `set_change_listener`. The callback runs under the connection lock and must
-  not block or reenter the database. The composition root alone fans hints out
-  to WebDAV/S3; database modules must not import these service consumers.
-- Notifications are SQLite change hints, not commit or remote-sync guarantees.
-  A write later rolled back can still notify. Replacing a listener replaces the
-  prior connection callback. Batching, allowlisted tables, and import suppression
-  are owned by [Automatic Cloud Sync Scheduling](./auto-sync.md).
+- Cloud sync and its database change listener are retired. No database hook
+  schedules uploads. [Retired Cloud Sync](./auto-sync.md) owns the opaque legacy
+  settings preservation boundary; existing database tables are retained.
 - Tables, indexes, foreign keys, uniqueness constraints, and CHECK clauses are
   part of the public persistence contract. A Rust enum/DTO change is incomplete
   until stored legacy values and schema constraints have a deliberate decode or

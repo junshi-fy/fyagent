@@ -153,6 +153,24 @@ describe("Native ACL contract", () => {
     );
   });
 
+  it("keeps retired cloud sync commands unregistered and disallowed", () => {
+    const registered = registeredCommands();
+    const allowed = activeAclCommands();
+    for (const backend of ["webdav", "s3"]) {
+      for (const operation of [
+        "test_connection",
+        "sync_upload",
+        "sync_download",
+        "sync_save_settings",
+        "sync_fetch_remote_info",
+      ]) {
+        const command = `${backend}_${operation}`;
+        expect(registered.has(command)).toBe(false);
+        expect(allowed.has(command)).toBe(false);
+      }
+    }
+  });
+
   it("registers Change Plan, Agent action, and Agent auth commands", () => {
     const registered = registeredCommands();
     const expected = [

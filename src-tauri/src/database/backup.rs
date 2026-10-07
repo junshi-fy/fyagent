@@ -76,6 +76,7 @@ fn import_authorizer(context: rusqlite::hooks::AuthContext<'_>) -> rusqlite::hoo
 pub(crate) use super::retired_customer_projects::RETIRED_MODULE_TABLES;
 
 /// Tables whose data rows are skipped when exporting for WebDAV sync.
+#[cfg(test)]
 const SYNC_SKIP_TABLES: &[&str] = &[
     "proxy_request_logs",
     "stream_check_logs",
@@ -102,6 +103,7 @@ const LOCAL_ONLY_RECEIPT_TABLES: &[&str] = &["session_restore_attempts"];
 
 /// Tables whose local data is preserved (restored from local snapshot) during WebDAV import.
 /// Excludes ephemeral tables like provider_health that can safely rebuild at runtime.
+#[cfg(test)]
 const SYNC_PRESERVE_TABLES: &[&str] = &[
     "proxy_request_logs",
     "stream_check_logs",
@@ -144,6 +146,7 @@ impl Database {
     }
 
     /// Export SQL for sync (WebDAV), skipping local-only tables' data
+    #[cfg(test)]
     pub fn export_sql_string_for_sync(&self) -> Result<String, AppError> {
         let snapshot = self.snapshot_to_memory()?;
         Self::sanitize_provider_export(&snapshot)?;
@@ -246,6 +249,7 @@ impl Database {
 
     /// Import SQL generated for sync, then restore local-only tables from the
     /// current device snapshot before replacing the main database.
+    #[cfg(test)]
     pub(crate) fn import_sql_string_for_sync(&self, sql_raw: &str) -> Result<String, AppError> {
         self.import_sql_string_inner(sql_raw, SYNC_PRESERVE_TABLES)
     }

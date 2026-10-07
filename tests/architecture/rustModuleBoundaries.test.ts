@@ -52,19 +52,47 @@ describe("Rust modular architecture boundaries", () => {
     ).not.toMatch(/ProviderService|switch_with_lock|write_text_file/u);
   });
 
-  it("keeps sync scheduling out of adapters and cloud consumers out of SQLite", () => {
+  it("keeps retired cloud sync modules and database hooks out of the host", () => {
+    const services = read("src-tauri/src/services/mod.rs");
+    const commands = read("src-tauri/src/commands/mod.rs");
+    const host = read("src-tauri/src/lib.rs");
     const database = read("src-tauri/src/database/mod.rs");
-    expect(database).toContain("fn set_change_listener");
-    expect(database).not.toMatch(/services::(?:s3|webdav)_auto_sync/u);
-    expect(read("src-tauri/src/lib.rs")).toContain("db.set_change_listener");
-    expect(read("src-tauri/src/services/mod.rs")).toMatch(/^mod auto_sync;$/mu);
-    for (const name of ["s3_auto_sync", "webdav_auto_sync"]) {
-      const source = read(`src-tauri/src/services/${name}.rs`);
-      expect(source).toContain("AUTO_SYNC.start(");
-      expect(source).not.toMatch(
-        /tokio::(?:sync|time)|AtomicUsize|OnceLock|crate::commands::/u,
-      );
+    const settingsTypes = read("src/domain/configuration/types.ts");
+    for (const name of [
+      "auto_sync",
+      "s3_auto_sync",
+      "webdav_auto_sync",
+      "s3_sync",
+      "webdav_sync",
+      "s3",
+      "webdav",
+      "sync_protocol",
+    ]) {
+      expect(services).not.toMatch(new RegExp(`\\bmod ${name};`, "u"));
+      expect(
+        fs.existsSync(
+          path.join(repositoryRoot, `src-tauri/src/services/${name}.rs`),
+        ),
+      ).toBe(false);
     }
+    for (const name of ["s3_sync", "webdav_sync"]) {
+      expect(commands).not.toContain(`mod ${name};`);
+      expect(
+        fs.existsSync(
+          path.join(repositoryRoot, `src-tauri/src/commands/${name}.rs`),
+        ),
+      ).toBe(false);
+    }
+    expect(
+      fs.existsSync(
+        path.join(repositoryRoot, "src-tauri/src/services/webdav_sync"),
+      ),
+    ).toBe(false);
+    expect(host).not.toMatch(/(?:s3|webdav)_auto_sync|set_change_listener/u);
+    expect(database).not.toMatch(/set_change_listener|update_hook/u);
+    expect(settingsTypes).not.toMatch(
+      /WebDavSync|S3Sync|webdavSync|s3Sync|autoSyncConfirmed|RemoteSnapshot/u,
+    );
   });
 
   it("requires mature version parsing and one private MCP document owner", () => {

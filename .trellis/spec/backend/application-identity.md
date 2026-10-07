@@ -38,7 +38,7 @@ The active application identity is:
 | Application state root                                  | `~/.fyagent`                             |
 | Database and application log                            | `fyagent.db` / `logs/fyagent.log`        |
 | Application-owned environment variables                 | `FYAGENT_*`                              |
-| Default WebDAV/S3 root                                  | `fyagent-sync`                           |
+| Legacy WebDAV/S3 root (retired; unused)                                  | `fyagent-sync`                           |
 | Skill storage serialized value                          | `fyagent`                                |
 | Renderer-owned storage namespaces                       | `fyagent-*`, `fyagent.*`, or `fyagent:*` |
 | Codex official-proxy marker                             | `fyagent-official`                       |
