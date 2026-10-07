@@ -95,7 +95,7 @@
     ],
     [
       "src-tauri/src/claude_desktop_config.rs",
-      "fa9ae4e48f64ad08177a6cb9565f754a219f9fd46d0f9a07f6a66a79acc43e1e"
+      "2152c22d8ed8c49f963053e710778b26c7b536138c0d6aa92508feee8c51bda6"
     ],
     [
       "src-tauri/src/claude_mcp.rs",

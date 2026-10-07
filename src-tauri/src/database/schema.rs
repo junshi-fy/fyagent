@@ -617,7 +617,9 @@ impl Database {
                         Self::set_user_version(conn, 26)?;
                     }
                     26 => {
-                        log::info!("迁移数据库从 v26 到 v27（上游会话游标、去重账本和 Skills Mcode 列）");
+                        log::info!(
+                            "迁移数据库从 v26 到 v27（上游会话游标、去重账本和 Skills Mcode 列）"
+                        );
                         Self::migrate_v26_to_v27(conn)?;
                         Self::set_user_version(conn, 27)?;
                     }
@@ -4631,7 +4633,11 @@ mod tests {
         // columns to these existing v26 tables on its own.
         Database::create_tables_on_conn(&conn)?;
         assert!(!Database::has_column(&conn, "skills", "enabled_mcode")?);
-        assert!(!Database::has_column(&conn, "session_log_sync", "last_byte_offset")?);
+        assert!(!Database::has_column(
+            &conn,
+            "session_log_sync",
+            "last_byte_offset"
+        )?);
         Database::apply_schema_migrations_on_conn(&conn)?;
         assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
         let flags: (i64, i64, i64) = conn.query_row(
@@ -4659,7 +4665,8 @@ mod tests {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         assert_eq!(cursor, (123, 456));
-        let enabled: i64 = conn.query_row("SELECT enabled_mcode FROM skills", [], |row| row.get(0))?;
+        let enabled: i64 =
+            conn.query_row("SELECT enabled_mcode FROM skills", [], |row| row.get(0))?;
         assert_eq!(enabled, 1);
 
         let fresh = Connection::open_in_memory()?;
@@ -4668,7 +4675,8 @@ mod tests {
         assert_eq!(Database::get_user_version(&fresh)?, SCHEMA_VERSION);
         for table in ["skills", "session_log_sync", "session_usage_dedup"] {
             let columns = |db: &Connection| -> rusqlite::Result<Vec<String>> {
-                let mut stmt = db.prepare("SELECT name FROM pragma_table_info(?1) ORDER BY name")?;
+                let mut stmt =
+                    db.prepare("SELECT name FROM pragma_table_info(?1) ORDER BY name")?;
                 let rows = stmt.query_map([table], |row| row.get(0))?;
                 rows.collect()
             };
@@ -4691,19 +4699,17 @@ mod tests {
         )?;
         Database::apply_schema_migrations_on_conn(&conn)?;
         assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
-        let enabled: i64 = conn.query_row("SELECT enabled_mcode FROM skills", [], |row| row.get(0))?;
+        let enabled: i64 =
+            conn.query_row("SELECT enabled_mcode FROM skills", [], |row| row.get(0))?;
         assert_eq!(enabled, 1);
-        let byte_offset: i64 = conn.query_row(
-            "SELECT last_byte_offset FROM session_log_sync",
-            [],
-            |row| row.get(0),
-        )?;
+        let byte_offset: i64 =
+            conn.query_row("SELECT last_byte_offset FROM session_log_sync", [], |row| {
+                row.get(0)
+            })?;
         assert_eq!(byte_offset, 123);
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM session_usage_dedup",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM session_usage_dedup", [], |row| {
+            row.get(0)
+        })?;
         assert_eq!(count, 1);
         Ok(())
     }
@@ -4717,13 +4723,20 @@ mod tests {
         assert!(Database::apply_schema_migrations_on_conn(&conn).is_err());
         assert_eq!(Database::get_user_version(&conn)?, 26);
         assert!(!Database::has_column(&conn, "skills", "enabled_mcode")?);
-        assert!(!Database::has_column(&conn, "session_log_sync", "last_byte_offset")?);
-        assert!(!Database::has_column(&conn, "session_log_sync", "last_tail_fingerprint")?);
-        let line_offset: i64 = conn.query_row(
-            "SELECT last_line_offset FROM session_log_sync",
-            [],
-            |row| row.get(0),
-        )?;
+        assert!(!Database::has_column(
+            &conn,
+            "session_log_sync",
+            "last_byte_offset"
+        )?);
+        assert!(!Database::has_column(
+            &conn,
+            "session_log_sync",
+            "last_tail_fingerprint"
+        )?);
+        let line_offset: i64 =
+            conn.query_row("SELECT last_line_offset FROM session_log_sync", [], |row| {
+                row.get(0)
+            })?;
         assert_eq!(line_offset, 3);
         Ok(())
     }
