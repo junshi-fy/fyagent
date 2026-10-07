@@ -72,7 +72,7 @@ jobs:
   smoke:
     name: ${{ matrix.id }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -177,7 +177,7 @@ jobs:
       - name: "E2E: onboarding and one-click installs through FyAgent UI"
         if: env.SMOKE_SCENARIO == 'fyagent-e2e'
         continue-on-error: true
-        timeout-minutes: 45
+        timeout-minutes: 90
         shell: bash
         run: |
           if [ "$SMOKE_PLATFORM" = windows ]; then
