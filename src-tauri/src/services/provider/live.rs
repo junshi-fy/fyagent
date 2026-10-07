@@ -3,6 +3,7 @@
 //! Handles reading and writing live configuration files for Claude, Codex, and Gemini.
 
 use std::collections::HashMap;
+#[cfg(test)]
 use std::sync::Arc;
 
 use serde_json::{json, Value};
@@ -16,6 +17,7 @@ use crate::config::{
 use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
+#[cfg(test)]
 use crate::proxy::providers::codex_oauth_auth::CodexOAuthManager;
 use crate::services::mcp::McpService;
 use crate::store::AppState;
@@ -787,26 +789,7 @@ pub(crate) fn write_live_with_common_config(
     write_live_snapshot(app_type, &effective_provider)
 }
 
-/// Validate the target provider's Codex live projection without writing:
-/// build the effective settings exactly like the live write would, then run
-/// the write-layer plan (legacy normalization, safety gates, token
-/// injection, TOML parsing). Called before `current` is committed — a
-/// write-layer refusal after `current` moved would let the next switch
-/// backfill the old live config into the new provider's DB row.
-pub(crate) fn build_effective_provider_for_live_with_codex_oauth_manager(
-    db: &Database,
-    app_type: &AppType,
-    provider: &Provider,
-    codex_oauth_manager: &Arc<CodexOAuthManager>,
-) -> Result<Provider, AppError> {
-    let mut effective_provider = provider.clone();
-    effective_provider.settings_config =
-        build_effective_settings_with_common_config(db, app_type, provider)?;
-    apply_codex_official_auth(app_type, &mut effective_provider, Some(codex_oauth_manager))?;
-    neutralize_codex_proxy_oauth_fallback(app_type, &mut effective_provider);
-    Ok(effective_provider)
-}
-
+#[cfg(test)]
 fn neutralize_codex_proxy_oauth_fallback(app_type: &AppType, provider: &mut Provider) {
     if !matches!(app_type, AppType::Codex) || !provider.uses_proxy_injected_oauth() {
         return;
@@ -824,6 +807,7 @@ fn neutralize_codex_proxy_oauth_fallback(app_type: &AppType, provider: &mut Prov
     }
 }
 
+#[cfg(test)]
 fn apply_codex_official_auth(
     app_type: &AppType,
     provider: &mut Provider,
@@ -871,6 +855,7 @@ fn apply_codex_official_auth(
     Ok(())
 }
 
+#[cfg(test)]
 fn get_codex_managed_oauth_live_auth_value(
     manager: Arc<CodexOAuthManager>,
     account_id: String,
@@ -909,7 +894,8 @@ fn get_codex_managed_oauth_live_auth_value(
     .map_err(AppError::Message)
 }
 
-pub(crate) fn codex_managed_oauth_live_auth(
+#[cfg(test)]
+fn codex_managed_oauth_live_auth(
     chatgpt_account_id: &str,
     access_token: &str,
     id_token: Option<&str>,
@@ -928,44 +914,12 @@ pub(crate) fn codex_managed_oauth_live_auth(
     )
 }
 
-pub(crate) fn write_live_with_common_config_for_codex_oauth_manager(
-    db: &Database,
-    app_type: &AppType,
-    provider: &Provider,
-    codex_oauth_manager: &Arc<CodexOAuthManager>,
-) -> Result<(), AppError> {
-    let effective_provider = build_effective_provider_for_live_with_codex_oauth_manager(
-        db,
-        app_type,
-        provider,
-        codex_oauth_manager,
-    )?;
-
-    if matches!(app_type, AppType::ClaudeDesktop) {
-        crate::claude_desktop_config::apply_provider(db, &effective_provider)?;
-        log::info!(
-            "Claude Desktop 3P profile '{}' written for provider '{}'",
-            crate::claude_desktop_config::PROFILE_ID,
-            effective_provider.id
-        );
-        return Ok(());
-    }
-
-    if super::is_quick_setup_provider_id(app_type, &effective_provider.id) {
-        return write_quick_setup_live_snapshot(app_type, &effective_provider);
-    }
-
-    if matches!(app_type, AppType::Codex) {
-        let snippet = db.get_config_snippet(app_type.as_str())?;
-        let common_snippet = provider_uses_common_config(app_type, provider, snippet.as_deref())
-            .then_some(snippet)
-            .flatten();
-        return write_codex_live_snapshot(&effective_provider, common_snippet.as_deref());
-    }
-
-    write_live_snapshot(app_type, &effective_provider)
-}
-
+/// Validate the target provider's Codex live projection without writing:
+/// build the effective settings exactly like the live write would, then run
+/// the write-layer plan (legacy normalization, safety gates, token
+/// injection, TOML parsing). Called before `current` is committed — a
+/// write-layer refusal after `current` moved would let the next switch
+/// backfill the old live config into the new provider's DB row.
 pub(crate) fn preflight_codex_live_write_for_state(
     state: &AppState,
     provider: &Provider,
@@ -973,6 +927,9 @@ pub(crate) fn preflight_codex_live_write_for_state(
     let mut effective = provider.clone();
     effective.settings_config =
         build_effective_settings_with_common_config(state.db.as_ref(), &AppType::Codex, provider)?;
+    if crate::proxy::providers::is_codex_official_provider(&effective) {
+        effective.category = Some("official".to_string());
+    }
     let obj = effective
         .settings_config
         .as_object()
@@ -1323,8 +1280,8 @@ fn restore_live_settings_for_provider_backfill(
     }
 
     let mut settings = live_settings;
-    let restore_provider_token =
-        crate::codex_config::should_restore_codex_provider_token_for_backfill(
+    let restore_provider_token = !crate::proxy::providers::is_codex_official_provider(provider)
+        && crate::codex_config::should_restore_codex_provider_token_for_backfill(
             provider.category.as_deref(),
             &provider.settings_config,
         );
@@ -1337,6 +1294,25 @@ fn restore_live_settings_for_provider_backfill(
             "Failed to restore Codex settings while backfilling '{}': {err}",
             provider.id
         );
+    }
+
+    // A source with provider-owned credentials must retain them when Live
+    // has no credential (for example header/env authentication or logout).
+    // Official follow-login cards deliberately retain Live's logged-out state.
+    if restore_provider_token
+        && settings
+            .get("auth")
+            .is_none_or(|auth| !crate::codex_config::codex_auth_has_login_material(auth))
+    {
+        if let (Some(stored_auth), Some(obj)) = (
+            provider
+                .settings_config
+                .get("auth")
+                .filter(|auth| crate::codex_config::extract_codex_auth_api_key(auth).is_some()),
+            settings.as_object_mut(),
+        ) {
+            obj.insert("auth".to_string(), stored_auth.clone());
+        }
     }
 
     strip_codex_managed_oauth_auth_for_backfill(provider, &mut settings);
@@ -1420,6 +1396,13 @@ pub(crate) fn normalize_provider_common_config_for_storage(
     app_type: &AppType,
     provider: &mut Provider,
 ) -> Result<(), AppError> {
+    if matches!(app_type, AppType::Codex)
+        && crate::proxy::providers::is_codex_official_provider(provider)
+    {
+        crate::codex_config::strip_codex_unified_session_bucket_from_settings(
+            &mut provider.settings_config,
+        )?;
+    }
     let uses_common_config = provider
         .meta
         .as_ref()
@@ -1537,10 +1520,15 @@ fn write_codex_live_snapshot(
         .get("auth")
         .ok_or_else(|| AppError::Config("Codex 供应商配置缺少 'auth' 字段".to_string()))?;
     let config_str = obj.get("config").and_then(|v| v.as_str());
+    let category = if crate::proxy::providers::is_codex_official_provider(provider) {
+        Some("official")
+    } else {
+        provider.category.as_deref()
+    };
     let profile = crate::proxy::providers::resolve_codex_catalog_tool_profile(provider);
     crate::codex_config::write_codex_provider_live_with_common_snippet(
         &provider.settings_config,
-        provider.category.as_deref(),
+        category,
         auth,
         config_str,
         profile,

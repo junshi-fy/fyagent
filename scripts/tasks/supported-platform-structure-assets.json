@@ -103,11 +103,11 @@
     ],
     [
       "src-tauri/src/codex_config.rs",
-      "9c7470fbc079cfa2ba0d3f2159c048db55401ef1b51c2670bf05bae593cb9859"
+      "9bccc189db68781eee924686fc7bfffd80ef272f3d96da09449a295d0131f1cb"
     ],
     [
       "src-tauri/src/codex_config/catalog.rs",
-      "8f1e64351390e9e43632c7e54c248fc8fabeda917401d1369c3eb33e4f6cbb4b"
+      "518065326134966f29e0f2e3c81b1d81f45de2a5cd5d03a9ef426d7578e38a39"
     ],
     [
       "src-tauri/src/codex_desktop_runtime.rs",
@@ -163,7 +163,7 @@
     ],
     [
       "src-tauri/src/database/backup.rs",
-      "706cef26c215d062c21c1d0d050e8669c17453ee27bb75d378a55bbbfbfe0f77"
+      "f62a7128ed6aff6bc5f1c8e01240acc33dc17a6e3f138a16b7e0863d336da95f"
     ],
     [
       "src-tauri/src/gemini_config.rs",
@@ -175,7 +175,7 @@
     ],
     [
       "src-tauri/src/lib.rs",
-      "894aa8693b2745a41e3f2a51a82dc2945a6dbd0fef9d0595c70aec324af8da81"
+      "28e44cbea292c8cff52dce6d829845213ef4a6d307c35b770f6698d80dad05f6"
     ],
     [
       "src-tauri/src/lightweight.rs",
@@ -223,7 +223,7 @@
     ],
     [
       "src-tauri/src/proxy/providers/codex_oauth_auth.rs",
-      "328f68267044777eb5220a471d4655cdd32ef3cb5ad2c8956197e7b8cc25f117"
+      "3d78470b53b384621f872fba01f9838401b3c9e789088c544e43598c74daa776"
     ],
     [
       "src-tauri/src/proxy/providers/copilot_auth.rs",
@@ -275,11 +275,11 @@
     ],
     [
       "src-tauri/src/services/provider/mod.rs",
-      "2ec124c001f7fe1dd1c2670cad41ff9a22412768df030915798e975af4adcae5"
+      "3f04c3b1d2e2d1bc93cf58c1c1225b744c91b3548f40ae55ee45a0d2a0198027"
     ],
     [
       "src-tauri/src/services/proxy.rs",
-      "8f0d5c8d23cd75774dbfb375668d1c6dcd054f361dc06b5ebe24ccf32bbf41fe"
+      "f6f29c26d797ef7d8375a3599d5104acb2c70a63bbf87dbd9bffcbd0771582d0"
     ],
     [
       "src-tauri/src/services/qoderwork.rs",

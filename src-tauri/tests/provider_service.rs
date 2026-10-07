@@ -807,10 +807,18 @@ requires_openai_auth = true
     ProviderService::switch(&state, AppType::Codex, "third-party")
         .expect("switch to third-party provider should succeed");
 
-    assert!(
-        !fyagent_lib::get_codex_auth_path().exists(),
-        "default (preservation off) must delete auth.json on a third-party switch — \
-         the official login goes away and the key rides in config.toml instead"
+    let auth_value: serde_json::Value =
+        read_json_file(&fyagent_lib::get_codex_auth_path()).expect("read auth.json");
+    assert_eq!(
+        auth_value, live_auth,
+        "third-party switches must keep the official ChatGPT login in auth.json"
+    );
+    assert_eq!(
+        auth_value
+            .pointer("/tokens/access_token")
+            .and_then(|v| v.as_str()),
+        Some("official-oauth-token"),
+        "official OAuth tokens must survive a third-party provider switch"
     );
     let live_config =
         std::fs::read_to_string(fyagent_lib::get_codex_config_path()).expect("read config.toml");

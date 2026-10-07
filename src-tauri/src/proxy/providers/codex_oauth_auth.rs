@@ -2454,7 +2454,7 @@ mod tests {
             let manager = CodexOAuthManager::new(path.clone());
             let account = manager
                 .add_account_internal(
-                    "workspace-123".to_string(),
+                    "acc-123".to_string(),
                     "rt-secret".to_string(),
                     Some("user@example.com".to_string()),
                     "at-secret".to_string(),

@@ -32,13 +32,35 @@ pub(crate) const CODEX_WEB_SEARCH_FIELD: &str = "web_search";
 pub(crate) const CODEX_WEB_SEARCH_DISABLED: &str = "disabled";
 
 const CODEX_WEB_SEARCH_REJECT_HOSTS: &[&str] = &[
-    "xiaomimimo.com",
-    "longcat.chat",
-    "minimax.io",
-    "minimaxi.com",
+    "xiaomimimo.com", // Xiaomi MiMo (api.xiaomimimo.com, token-plan-cn.xiaomimimo.com)
+    "longcat.chat",   // Meituan LongCat (api.longcat.chat)
+    "minimax.io",     // MiniMax global (api.minimax.io)
+    "minimax.cn",     // MiniMax CN (current official endpoint)
+    "minimaxi.com",   // MiniMax CN (legacy endpoint)
+    // StepFun Responses API currently supports only `function` tools:
+    // platform.stepfun.com/docs/zh/api-reference/responses/responses-create
+    "stepfun.com",
+    "stepfun.ai",
+    // Conservative (unverified, not a confirmed reject): Baidu Qianfan's
+    // pay-as-you-go Responses guide documents only `function` / `mcp` tools
+    // (cloud.baidu.com/doc/qianfan-docs/s/4mi400l1m). Host-exact; Qianfan's
+    // Chat plans on the same domain are ProxyChat and never consult this list.
+    "qianfan.baidubce.com",
+    // Conservative (unverified): iFlytek Astron Coding Plan fronts third-party
+    // models behind one Responses gateway with no documented hosted-tool
+    // support (www.xfyun.cn/doc/spark/CodingPlan.html).
+    "xf-yun.com",
+    // Zhipu GLM CN / global (open.bigmodel.cn, api.z.ai): the native Responses
+    // gateway's tool-type enum is `function | web_search_preview |
+    // code_interpreter | mcp` (verbatim from the #6944 400 body) — Codex's
+    // `web_search` hosted tool is not in it. Matched on host labels (see
+    // `codex_url_host_matches_any`), so `xyz.ai` never collides with `z.ai`.
+    "bigmodel.cn",
+    "z.ai",
 ];
+
 const CODEX_WEB_SEARCH_REJECT_MODEL_PREFIXES: &[&str] =
-    &["mimo", "longcat", "minimax", "qwen3-coder"];
+    &["mimo", "longcat", "minimax", "qwen3-coder", "glm"];
 
 pub(crate) fn codex_top_level_model(config_text: &str) -> Option<String> {
     let doc = config_text.parse::<toml::Value>().ok()?;
@@ -50,16 +72,14 @@ pub(crate) fn codex_top_level_model(config_text: &str) -> Option<String> {
 
 pub(crate) fn codex_native_gateway_rejects_web_search(config_text: &str) -> bool {
     if let Some(base_url) = extract_codex_base_url(config_text) {
-        let base_url = base_url.to_ascii_lowercase();
-        if CODEX_WEB_SEARCH_REJECT_HOSTS
-            .iter()
-            .any(|host| base_url.contains(host))
-        {
+        if codex_url_host_matches_any(&base_url, CODEX_WEB_SEARCH_REJECT_HOSTS) {
             return true;
         }
     }
     if let Some(model) = codex_top_level_model(config_text) {
         let model = model.to_ascii_lowercase();
+        // Strip any aggregator "vendor/" prefix, e.g. "MiniMaxAI/MiniMax-M3"
+        // or "qwen/qwen3-coder-plus".
         let model = model.rsplit('/').next().unwrap_or(model.as_str());
         if CODEX_WEB_SEARCH_REJECT_MODEL_PREFIXES
             .iter()
@@ -100,6 +120,88 @@ pub(super) fn codex_catalog_input_modalities(
     modalities.iter().map(|item| (*item).to_string()).collect()
 }
 
+const CODEX_REASONING_LEVEL_DESCRIPTIONS: &[(&str, &str)] = &[
+    ("none", "Disable Thinking"),
+    ("minimal", "Minimal reasoning"),
+    ("low", "Fast responses with lighter reasoning"),
+    (
+        "medium",
+        "Balances speed and reasoning depth for everyday tasks",
+    ),
+    ("high", "Greater reasoning depth for complex problems"),
+    ("xhigh", "Extra high reasoning depth for complex problems"),
+    ("max", "Maximum reasoning depth for the hardest problems"),
+    ("ultra", "Ultra reasoning depth"),
+];
+
+fn codex_reasoning_level_description(effort: &str) -> Option<&'static str> {
+    CODEX_REASONING_LEVEL_DESCRIPTIONS
+        .iter()
+        .find(|(candidate, _)| *candidate == effort)
+        .map(|(_, description)| *description)
+}
+
+/// User-declared levels reduced to the canonical efforts Codex understands,
+/// in canonical (lowest → highest) order regardless of declaration order.
+/// Unknown efforts are dropped so a typo can never produce an entry Codex
+/// would reject.
+fn codex_canonical_efforts(levels: &[String]) -> Vec<&str> {
+    CODEX_REASONING_LEVEL_DESCRIPTIONS
+        .iter()
+        .filter(|(effort, _)| levels.iter().any(|candidate| candidate == effort))
+        .map(|(effort, _)| *effort)
+        .collect()
+}
+
+/// Build a `supported_reasoning_levels` array from user-declared effort values.
+fn codex_supported_reasoning_levels(levels: &[String]) -> Value {
+    let entries: Vec<Value> = codex_canonical_efforts(levels)
+        .into_iter()
+        .map(|effort| {
+            let description = codex_reasoning_level_description(effort)
+                .expect("canonical effort always has a description");
+            json!({ "effort": effort, "description": description })
+        })
+        .collect();
+    json!(entries)
+}
+
+/// Apply a per-model reasoning-level override onto a catalog entry. Returns
+/// true when the override was applied (so callers can skip further work).
+/// `template_default` is the base entry's `default_reasoning_level` (from the
+/// profile template or an official vendor entry) used as the fallback when the
+/// user did not declare one explicitly.
+fn apply_codex_reasoning_level_override(
+    entry_obj: &mut serde_json::Map<String, Value>,
+    template_default: Option<&str>,
+    spec: &CodexCatalogModelSpec,
+) -> bool {
+    let Some(levels) = spec.reasoning_levels.as_deref() else {
+        return false;
+    };
+    let canonical = codex_canonical_efforts(levels);
+    if canonical.is_empty() {
+        return false;
+    }
+    let supported = codex_supported_reasoning_levels(levels);
+    entry_obj.insert("supported_reasoning_levels".to_string(), supported);
+
+    // Default: explicit user value wins; otherwise keep the base default when
+    // it is still supported; otherwise fall back to the highest supported
+    // level in canonical order. All candidates are validated against the
+    // canonical set so the default can never reference a dropped effort.
+    let default_level = spec
+        .default_reasoning_level
+        .as_deref()
+        .filter(|level| canonical.contains(level))
+        .or_else(|| template_default.filter(|level| canonical.contains(level)))
+        .or_else(|| canonical.last().copied());
+    if let Some(default_level) = default_level {
+        entry_obj.insert("default_reasoning_level".to_string(), json!(default_level));
+    }
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CodexCatalogModelSpec {
     pub(super) model: String,
@@ -108,6 +210,8 @@ pub(super) struct CodexCatalogModelSpec {
     pub(super) supports_parallel_tool_calls: Option<bool>,
     pub(super) input_modalities: Option<Vec<String>>,
     pub(super) base_instructions: Option<String>,
+    pub(super) reasoning_levels: Option<Vec<String>>,
+    pub(super) default_reasoning_level: Option<String>,
 }
 
 pub(super) fn codex_catalog_model_entry(
@@ -165,6 +269,10 @@ pub(super) fn codex_catalog_model_entry(
         }
     }
 
+    let template_default = template
+        .get("default_reasoning_level")
+        .and_then(Value::as_str);
+    apply_codex_reasoning_level_override(entry_obj, template_default, spec);
     entry
 }
 
@@ -177,8 +285,9 @@ pub(super) fn codex_catalog_model_specs(settings: &Value) -> Vec<CodexCatalogMod
         return Vec::new();
     };
 
-    let mut seen = HashSet::new();
+    let mut seen = std::collections::HashSet::new();
     let mut specs = Vec::new();
+
     for model_config in models {
         let Some(model) = model_config
             .get("model")
@@ -188,6 +297,7 @@ pub(super) fn codex_catalog_model_specs(settings: &Value) -> Vec<CodexCatalogMod
         else {
             continue;
         };
+
         if !seen.insert(model.to_string()) {
             continue;
         }
@@ -204,6 +314,7 @@ pub(super) fn codex_catalog_model_specs(settings: &Value) -> Vec<CodexCatalogMod
                 .get("contextWindow")
                 .or_else(|| model_config.get("context_window")),
         );
+
         let supports_parallel_tool_calls = model_config
             .get("supportsParallelToolCalls")
             .or_else(|| model_config.get("supports_parallel_tool_calls"))
@@ -220,12 +331,35 @@ pub(super) fn codex_catalog_model_specs(settings: &Value) -> Vec<CodexCatalogMod
                     .collect::<Vec<_>>()
             })
             .filter(|items| !items.is_empty());
+
         let base_instructions = model_config
             .get("baseInstructions")
             .or_else(|| model_config.get("base_instructions"))
             .and_then(|value| value.as_str())
             .map(str::trim)
             .filter(|text| !text.is_empty())
+            .map(str::to_string);
+
+        let reasoning_levels = model_config
+            .get("reasoningLevels")
+            .or_else(|| model_config.get("reasoning_levels"))
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str())
+                    .map(str::trim)
+                    .filter(|level| !level.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|levels| !levels.is_empty());
+        let default_reasoning_level = model_config
+            .get("defaultReasoningLevel")
+            .or_else(|| model_config.get("default_reasoning_level"))
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|level| !level.is_empty())
             .map(str::to_string);
 
         specs.push(CodexCatalogModelSpec {
@@ -235,8 +369,11 @@ pub(super) fn codex_catalog_model_specs(settings: &Value) -> Vec<CodexCatalogMod
             supports_parallel_tool_calls,
             input_modalities,
             base_instructions,
+            reasoning_levels,
+            default_reasoning_level,
         });
     }
+
     specs
 }
 
@@ -601,11 +738,21 @@ pub(super) fn codex_vendor_catalog_model_entry(
     {
         entry_obj.insert("base_instructions".to_string(), json!(base_instructions));
     }
+    let template_default = entry_obj
+        .get("default_reasoning_level")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    apply_codex_reasoning_level_override(entry_obj, template_default.as_deref(), spec);
     fill_template_fields_from_static(&mut entry);
     entry
 }
 
-const CODEX_CATALOG_PARSER_REQUIRED_FIELDS: &[&str] = &["supports_reasoning_summaries"];
+const CODEX_CATALOG_PARSER_REQUIRED_FIELDS: &[&str] = &[
+    "supports_reasoning_summaries",
+    // codex 0.148.0 rejects the catalog without it (#6661); a models_cache.json
+    // written by an older build can lack it.
+    "supports_parallel_tool_calls",
+];
 
 pub(super) fn fill_template_fields_from_static(template: &mut Value) {
     let Some(static_template) = load_codex_model_template_static() else {
@@ -725,9 +872,24 @@ pub(crate) fn set_codex_model_catalog_json_field(
     let mut doc = config_text
         .parse::<DocumentMut>()
         .map_err(|e| AppError::Message(format!("Invalid Codex config.toml: {e}")))?;
+
     match catalog_path {
         Some(_) => {
-            doc["model_catalog_json"] = toml_edit::value(FYAGENT_CODEX_MODEL_CATALOG_FILENAME);
+            // Only claim the pointer when it is absent or already cc-switch-owned.
+            // A user-managed external catalog file (custom filename or path) is
+            // left untouched, mirroring the None arm's ownership rule that
+            // `resolve_cc_switch_catalog_path` relies on.
+            let is_cc_switch_owned = doc
+                .get("model_catalog_json")
+                .and_then(|item| item.as_str())
+                .map(|path| {
+                    Path::new(path).file_name().and_then(|name| name.to_str())
+                        == Some(FYAGENT_CODEX_MODEL_CATALOG_FILENAME)
+                })
+                .unwrap_or(true);
+            if is_cc_switch_owned {
+                doc["model_catalog_json"] = toml_edit::value(FYAGENT_CODEX_MODEL_CATALOG_FILENAME);
+            }
         }
         None => {
             let should_remove = doc
@@ -743,6 +905,7 @@ pub(crate) fn set_codex_model_catalog_json_field(
             }
         }
     }
+
     Ok(doc.to_string())
 }
 

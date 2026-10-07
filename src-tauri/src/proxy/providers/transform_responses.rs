@@ -1955,6 +1955,11 @@ pub fn anthropic_to_responses(
         }
     }
 
+    // Anthropic permits parallel tools unless the caller explicitly disables
+    // them. Set its default before applying the shared native Responses policy.
+    if is_codex_oauth {
+        result["parallel_tool_calls"] = json!(true);
+    }
     if let Some(v) = body.get("tool_choice") {
         result["tool_choice"] =
             map_tool_choice_to_responses(v, &hosted_web_search_names, is_codex_oauth);
@@ -1990,6 +1995,14 @@ pub fn anthropic_to_responses(
             result["include"] = include.clone();
         }
         super::managed_responses::prepare_openai_generation(&mut result)?;
+        if !hosted_web_search_names.is_empty() {
+            // The shared generation policy has validated and normalized include.
+            if let Some(include) = result["include"].as_array_mut() {
+                if !include.iter().any(|item| item == WEB_SEARCH_SOURCES_MARKER) {
+                    include.push(json!(WEB_SEARCH_SOURCES_MARKER));
+                }
+            }
+        }
     }
 
     Ok(result)

@@ -2401,6 +2401,15 @@ impl RequestForwarder {
             is_copilot,
         );
 
+        // The selected credential owns routing identity. Replace caller copies
+        // after all header overrides, including on the first (pre-retry) request.
+        if let Some(account_id) = codex_oauth_account_id {
+            let account_id = http::HeaderValue::from_str(&account_id).map_err(|_| {
+                ProxyError::AuthError("Codex OAuth 绑定账号路由身份无效".to_string())
+            })?;
+            ordered_headers.insert("chatgpt-account-id", account_id);
+        }
+
         if provider.is_xai_oauth() {
             // The official CLI proxy routes by this header, not the JSON model
             // alone. Replace all inbound/custom copies after body mapping and

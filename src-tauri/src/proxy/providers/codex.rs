@@ -329,10 +329,52 @@ fn has_explicit_codex_third_party_upstream(provider: &Provider) -> bool {
 /// stay on the direct OpenAI API path instead of being sent to the ChatGPT
 /// backend. The fixed legacy card keeps its existing behavior.
 pub fn is_codex_official_provider(provider: &Provider) -> bool {
-    provider.id == crate::database::CODEX_OFFICIAL_PROVIDER_ID
-        && provider.category.as_deref() == Some("official")
-        && !provider.is_xai_oauth()
-        && !provider.is_codex_oauth()
+    // Explicit subscription routes use FyAgent's bound-account token resolver,
+    // even if editable native-route metadata has been cleared or contradicted.
+    if provider.uses_subscription_proxy() {
+        return false;
+    }
+    let is_fixed_official_id = provider.id == crate::database::CODEX_OFFICIAL_PROVIDER_ID;
+    if is_fixed_official_id && provider.category.as_deref() == Some("official") {
+        return true;
+    }
+
+    let has_auth_object = provider
+        .settings_config
+        .get("auth")
+        .is_some_and(JsonValue::is_object);
+    let has_valid_config_shape = provider
+        .settings_config
+        .get("config")
+        .is_none_or(|config| config.is_null() || config.is_string());
+    if !has_auth_object || !has_valid_config_shape {
+        return false;
+    }
+
+    if has_explicit_codex_third_party_upstream(provider) {
+        return false;
+    }
+
+    let has_managed_account = provider
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.managed_account_id_for("codex_oauth"))
+        .is_some_and(|account_id| !account_id.trim().is_empty());
+    if has_managed_account {
+        return true;
+    }
+
+    let has_stored_api_key = provider
+        .settings_config
+        .get("auth")
+        .and_then(|auth| auth.get("OPENAI_API_KEY"))
+        .and_then(JsonValue::as_str)
+        .is_some_and(|key| !key.trim().is_empty());
+    if has_stored_api_key {
+        return false;
+    }
+
+    is_fixed_official_id || provider.category.as_deref() == Some("official")
 }
 
 /// Resolve the model-catalog tool profile for a Codex provider using the SAME
@@ -1012,6 +1054,9 @@ impl ProviderAdapter for CodexAdapter {
     }
 
     fn extract_auth(&self, provider: &Provider) -> Option<AuthInfo> {
+        if is_codex_official_provider(provider) {
+            return None;
+        }
         if provider.is_codex_oauth() {
             return Some(AuthInfo::new(
                 "codex_oauth_placeholder".into(),
@@ -1188,7 +1233,6 @@ context_window = 500000
 
         provider.id = "managed-official-account".to_string();
         provider.meta = Some(crate::provider::ProviderMeta {
-            provider_type: Some("codex_oauth".to_string()),
             auth_binding: Some(crate::provider::AuthBinding {
                 source: crate::provider::AuthBindingSource::ManagedAccount,
                 auth_provider: Some("codex_oauth".to_string()),
@@ -1276,6 +1320,44 @@ context_window = 500000
         grok_official.id = crate::database::GROKBUILD_OFFICIAL_PROVIDER_ID.to_string();
         grok_official.category = Some("official".to_string());
         assert!(!is_codex_official_provider(&grok_official));
+    }
+
+    #[test]
+    fn subscription_codex_routes_never_become_native_auth_passthrough() {
+        let adapter = CodexAdapter::new();
+        let mut provider = create_provider(json!({ "auth": {}, "config": "" }));
+        provider.meta = Some(crate::provider::ProviderMeta {
+            provider_type: Some("codex_oauth".to_string()),
+            auth_binding: Some(crate::provider::AuthBinding {
+                source: crate::provider::AuthBindingSource::ManagedAccount,
+                auth_provider: Some("codex_oauth".to_string()),
+                account_id: Some("bound-account".to_string()),
+            }),
+            ..Default::default()
+        });
+
+        for id in [
+            "fyagent-openai-codex-test",
+            crate::database::CODEX_OFFICIAL_PROVIDER_ID,
+        ] {
+            provider.id = id.to_string();
+            for category in [None, Some("third_party"), Some("official")] {
+                provider.category = category.map(str::to_string);
+                for config in [
+                    JsonValue::Null,
+                    json!(""),
+                    json!("model_provider = \"openai\"\n"),
+                ] {
+                    provider.settings_config["config"] = config;
+                    assert!(!is_codex_official_provider(&provider));
+                    let auth = adapter
+                        .extract_auth(&provider)
+                        .expect("bound subscription auth");
+                    assert_eq!(auth.strategy, AuthStrategy::CodexOAuth);
+                    assert_eq!(auth.api_key, "codex_oauth_placeholder");
+                }
+            }
+        }
     }
 
     #[test]

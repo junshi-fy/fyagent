@@ -996,9 +996,9 @@ pub fn run() {
         }));
 
     #[cfg(target_os = "windows")]
-    {
+    let builder = {
         let startup_page_handled = std::sync::atomic::AtomicBool::new(false);
-        builder = builder.on_page_load(move |webview, payload| {
+        builder.on_page_load(move |webview, payload| {
             if webview.label() == "main"
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
                 && payload.url().scheme() != "about"
@@ -1008,8 +1008,8 @@ pub fn run() {
                 let _ = webview.window().show();
                 log::info!("主页面加载完成，主窗口已显示");
             }
-        });
-    }
+        })
+    };
 
     let builder = builder
         .on_page_load(|webview, payload| {
