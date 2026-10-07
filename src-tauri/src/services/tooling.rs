@@ -188,7 +188,7 @@ const ELEVATED_WINDOWS_CLI_BOUNDARY_MESSAGE: &str =
 pub(crate) const WINDOWS_HELPER_UNCONFIRMED_MESSAGE: &str =
     "暂时无法读取当前 Windows 用户的 CLI 状态，请稍后刷新。";
 
-#[cfg(any(target_os = "windows", test))]
+#[cfg(target_os = "windows")]
 fn windows_helper_left_state_unconfirmed(platform_error_code: Option<&str>) -> bool {
     matches!(
         platform_error_code,
@@ -706,12 +706,15 @@ enum ShellProbe {
     NotFound(String),
 }
 
+#[cfg(any(target_os = "macos", test))]
 const VERSION_PROBE_SENTINEL: &str = "__CCSWITCH_VERSION__";
 
+#[cfg(any(target_os = "macos", test))]
 fn version_probe_payload(tool: &str) -> String {
     format!("echo {VERSION_PROBE_SENTINEL}; {tool} --version")
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn after_version_sentinel(output: &str) -> &str {
     match output.rfind(VERSION_PROBE_SENTINEL) {
         Some(i) => output[i + VERSION_PROBE_SENTINEL.len()..].trim(),
@@ -1635,34 +1638,6 @@ fn resolve_path_default(
         return Ok(None);
     };
     Ok(std::fs::canonicalize(first).ok())
-}
-
-#[cfg(target_os = "windows")]
-fn windows_path_lookup_command(
-    tool: &str,
-    effective_path: &std::ffi::OsStr,
-) -> std::process::Command {
-    use std::os::windows::process::CommandExt;
-    use std::process::{Command, Stdio};
-
-    // Use the system copy explicitly so a project-local `where.exe` cannot
-    // hijack the passive lookup before the PATH-only pattern is evaluated.
-    let where_exe = PathBuf::from(
-        std::env::var_os("SystemRoot").unwrap_or_else(|| std::ffi::OsString::from(r"C:\Windows")),
-    )
-    .join("System32")
-    .join("where.exe");
-    let mut command = Command::new(where_exe);
-    command
-        // `$PATH:pattern` is where.exe's documented environment-variable
-        // search form. Unlike a bare pattern, it does not search the current
-        // directory before PATH.
-        .arg(format!("$PATH:{tool}"))
-        .env("PATH", effective_path)
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    command
 }
 
 #[cfg(target_os = "windows")]

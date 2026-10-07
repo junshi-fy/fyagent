@@ -93,9 +93,6 @@ pub const FYAGENT_CODEX_OFFICIAL_PROXY_PROVIDER_ID: &str = "fyagent-official";
 pub const FYAGENT_CODEX_MODEL_CATALOG_FILENAME: &str = "fyagent-model-catalog.json";
 const CODEX_PROXY_AUTH_PLACEHOLDER: &str = "PROXY_MANAGED";
 
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
 /// Host component of a base URL (or a bare host), lowercased, without scheme,
 /// userinfo, port, path or query. Tolerates the loose forms users paste into
 /// the provider form (`example.com`, `https://user@Example.com:8443/v1`).
@@ -700,6 +697,7 @@ pub fn clear_codex_live_auth_for_managed_account(account_id: &str) -> Result<(),
 
 /// Verify that the outgoing account's live refresh generation has not changed
 /// since it was adopted into the OAuth manager.
+#[cfg(test)]
 pub fn ensure_codex_live_auth_unchanged_for_managed_account(
     account_id: &str,
     expected_refresh_token: &str,
@@ -999,6 +997,7 @@ pub fn extract_codex_base_url(config_text: &str) -> Option<String> {
 /// ChatGPT. Presence is `Option::is_some`, i.e. any non-null value, even an
 /// empty one; the material itself is checked afterwards.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(test)]
 enum CodexResolvedAuthMode {
     ApiKey,
     Chatgpt,
@@ -1014,6 +1013,7 @@ enum CodexResolvedAuthMode {
     Unrecognized,
 }
 
+#[cfg(test)]
 fn codex_auth_resolved_mode(auth: &serde_json::Map<String, Value>) -> CodexResolvedAuthMode {
     let present = |key: &str| auth.get(key).is_some_and(|value| !value.is_null());
 
@@ -1057,6 +1057,7 @@ fn codex_auth_resolved_mode(auth: &serde_json::Map<String, Value>) -> CodexResol
 /// Modes Codex cannot load from storage (`headers`, unrecognized) are signed
 /// out. The credential must be non-blank (stricter than Codex's `is_some`,
 /// erring toward "signed out"); metadata such as `last_refresh` never counts.
+#[cfg(test)]
 pub fn codex_auth_has_openai_account_material(auth: &Value) -> bool {
     let Some(obj) = auth.as_object() else {
         return false;
@@ -1093,6 +1094,7 @@ pub fn codex_auth_has_openai_account_material(auth: &Value) -> bool {
 /// Where Codex keeps CLI auth, per the top-level `cli_auth_credentials_store`
 /// key (`codex-rs/config/src/types.rs`, serde lowercase; unset = `file`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) enum CodexAuthStoreMode {
     /// `auth.json` is the only store — the file decides login state.
     File,
@@ -1106,6 +1108,7 @@ pub(crate) enum CodexAuthStoreMode {
     Unknown,
 }
 
+#[cfg(test)]
 pub(crate) fn codex_config_auth_store_mode(config_text: &str) -> CodexAuthStoreMode {
     if !config_text.contains("cli_auth_credentials_store") {
         return CodexAuthStoreMode::File;
@@ -1746,6 +1749,7 @@ fn normalize_codex_legacy_openai_reroute(config_text: &str) -> Result<Option<Str
 /// Returns `Some(updated)` only when the flag was an explicit `true`;
 /// absent/false flags, non-custom routing, and unparsable TOML pass through
 /// unchanged (`None`) so downstream validators keep ownership of errors.
+#[cfg(test)]
 pub fn neutralize_codex_official_auth_fallback_for_proxy_oauth(
     config_text: &str,
 ) -> Option<String> {
@@ -2281,8 +2285,21 @@ pub fn strip_codex_mcp_servers_from_settings(settings: &mut Value) -> Result<(),
 }
 
 struct CodexLiveWritePlan {
-    write_full_auth: bool,
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "Production consumes this plan for preflight; legacy projection tests inspect its decisions"
+        )
+    )]
     config_text: Option<String>,
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "Production consumes this plan for preflight; legacy projection tests inspect its decisions"
+        )
+    )]
     remove_auth_file: bool,
 }
 
@@ -2328,11 +2345,8 @@ fn plan_codex_live_write(
             None
         };
         let config_text = unified_official_config.as_deref().or(config_text);
-        // Official cards own auth.json: a material-carrying login is written
-        // in full, a material-less card follows the live login and only
-        // writes config. Official auth never travels through config.toml.
+        // The preflight plan keeps official auth out of config.toml.
         return Ok(CodexLiveWritePlan {
-            write_full_auth: codex_auth_has_login_material(auth),
             config_text: config_text.map(str::to_string),
             remove_auth_file: false,
         });
@@ -2420,7 +2434,6 @@ fn plan_codex_live_write(
     )?;
 
     Ok(CodexLiveWritePlan {
-        write_full_auth: false,
         config_text: Some(live_config),
         remove_auth_file,
     })
@@ -2438,39 +2451,6 @@ pub fn preflight_codex_live_write(
         crate::settings::preserve_codex_official_auth_on_switch(),
     )
     .map(|_| ())
-}
-
-pub fn write_codex_live_for_provider(
-    category: Option<&str>,
-    auth: &Value,
-    config_text: Option<&str>,
-) -> Result<(), AppError> {
-    let plan = plan_codex_live_write(
-        category,
-        auth,
-        config_text,
-        crate::settings::preserve_codex_official_auth_on_switch(),
-    )?;
-    if plan.write_full_auth {
-        return write_codex_live_atomic(auth, plan.config_text.as_deref());
-    }
-    write_codex_live_config_atomic(plan.config_text.as_deref())?;
-    // Config is already committed at this point, so a cleanup failure
-    // degrades to a warning instead of reporting an unswitched state.
-    if plan.remove_auth_file {
-        remove_codex_live_auth_after_third_party_switch();
-    }
-    Ok(())
-}
-
-fn remove_codex_live_auth_after_third_party_switch() {
-    let auth_path = get_codex_auth_path();
-    if !auth_path.exists() {
-        return;
-    }
-    if let Err(e) = delete_file(&auth_path) {
-        log::warn!("Failed to remove auth.json after a third-party Codex switch: {e}");
-    }
 }
 
 /// A request-source switch owns routing/model fields, not account credentials

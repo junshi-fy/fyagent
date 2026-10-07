@@ -61,6 +61,7 @@ where
 /// Keep this transport-agnostic so WebDAV and S3 cannot silently drift apart.
 /// `model_pricing` is intentionally excluded while its local JSON sidecar is
 /// the user-owned SSOT.
+#[cfg(test)]
 pub(crate) fn should_trigger_auto_sync_for_table(table: &str) -> bool {
     let normalized = table.trim().to_ascii_lowercase();
     matches!(

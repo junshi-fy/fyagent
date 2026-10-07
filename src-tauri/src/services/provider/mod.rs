@@ -4919,6 +4919,7 @@ requires_openai_auth = true
 }
 
 impl ProviderService {
+    #[cfg(test)]
     fn managed_codex_oauth_account_id(provider: &Provider) -> Option<String> {
         provider
             .meta

@@ -1343,11 +1343,6 @@ impl ProxyService {
         self.switch_locks.lock_for_app(app_type).await
     }
 
-    /// 该应用是否正有切换 / 接管操作在进行中。见 `SwitchLockManager::is_locked_for_app`。
-    pub(crate) async fn is_switch_in_progress_for_app(&self, app_type: &str) -> bool {
-        self.switch_locks.is_locked_for_app(app_type).await
-    }
-
     /// 启动代理服务器
     pub async fn start(&self) -> Result<ProxyServerInfo, String> {
         let _start_guard = self.start_lock.lock().await;
@@ -3752,6 +3747,7 @@ impl ProxyService {
             .map_err(|e| format!("读取 Codex Live 配置失败: {e}"))
     }
 
+    #[cfg(test)]
     fn write_codex_live(&self, config: &Value) -> Result<(), String> {
         // Subscription takeover never owns Codex's native login. On restore,
         // retain its current bytes even if Codex refreshed/switched that login
@@ -10114,7 +10110,11 @@ base_url = "https://third.example/v1"
                     "last_refresh": "2026-08-01T00:00:00Z",
                     "tokens": { "account_id": "acc" }
                 },
-                "config": "model_provider = \"any\"\n"
+                "config": r#"model_provider = "any"
+
+[model_providers.any]
+base_url = "https://third.example/v1"
+"#
             }))
             .expect("serialize backup"),
         )

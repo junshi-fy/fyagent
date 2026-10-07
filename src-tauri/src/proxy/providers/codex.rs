@@ -261,27 +261,6 @@ pub fn provider_needs_responses_namespace_flatten(provider: &Provider) -> bool {
         .is_some_and(|url| url.host_str() == Some("api.x.ai"))
 }
 
-/// True when this Codex provider talks native Responses to first-party xAI
-/// (`api.x.ai`), including API-key Grok cards that are not `xai_oauth`.
-fn provider_is_xai_native_responses(provider: &Provider) -> bool {
-    let config_text = provider
-        .settings_config
-        .get("config")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    let Some(wire_api) = extract_codex_wire_api_from_toml(config_text) else {
-        return false;
-    };
-    if !wire_api.eq_ignore_ascii_case("responses") {
-        return false;
-    }
-
-    extract_codex_base_url_from_toml(config_text)
-        .map(|url| url.to_ascii_lowercase())
-        .is_some_and(|url| url.contains("api.x.ai"))
-}
-
 fn has_explicit_codex_third_party_upstream(provider: &Provider) -> bool {
     let non_empty_setting = |key: &str| {
         provider

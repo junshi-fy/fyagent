@@ -242,36 +242,10 @@ enum RefreshTokenAdoptionOutcome {
 }
 
 /// Keep a deleted account distinct from an existing account with no managed live token.
+#[cfg(test)]
 pub(crate) enum CodexLiveAuthSwitchGuard {
-    ExistingAccount(Option<String>),
+    ExistingAccount,
     MissingAccount,
-}
-
-impl CodexLiveAuthSwitchGuard {
-    pub(crate) fn ensure_unchanged(&self, account_id: &str) -> Result<(), crate::error::AppError> {
-        if let Self::ExistingAccount(Some(token)) = self {
-            crate::codex_config::ensure_codex_live_auth_unchanged_for_managed_account(
-                account_id, token,
-            )?;
-        }
-        Ok(())
-    }
-
-    pub(crate) fn clear_outgoing(&self, account_id: &str) -> Result<(), crate::error::AppError> {
-        match self {
-            Self::ExistingAccount(token) => {
-                crate::codex_config::clear_codex_live_auth_for_managed_account_if_unchanged(
-                    account_id,
-                    token.as_deref(),
-                )
-            }
-            Self::MissingAccount => {
-                crate::codex_config::clear_codex_managed_oauth_live_auth_marker_for_account(
-                    account_id,
-                )
-            }
-        }
-    }
 }
 
 impl RefreshTokenAdoptionOutcome {
@@ -415,12 +389,33 @@ struct LegacyCodexOAuthStore {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ManagedTokenBundle {
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "The coherent bundle is validated in production; legacy native-projection tests consume this field"
+        )
+    )]
     pub chatgpt_account_id: String,
     pub access_token: String,
     pub id_token: Option<String>,
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "The coherent bundle is validated in production; legacy native-projection tests consume this field"
+        )
+    )]
     pub refresh_token: String,
     /// access_token 的真实获取时间，RFC3339 纳秒精度 + `Z`（与原生 auth.json 的
     /// `last_refresh` 形状一致）。反映 token 何时真正刷新，而非写盘时刻。
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "The coherent bundle is validated in production; legacy native-projection tests consume this field"
+        )
+    )]
     pub last_refresh: String,
 }
 
@@ -746,9 +741,9 @@ impl CodexOAuthManager {
             .is_none()
             || account.chatgpt_account_id.trim().is_empty()
         {
-            return Err(CodexOAuthError::ParseError(format!(
-                "当前账号缺少 id_token 中可证明的用户身份或 workspace，请重新认证"
-            )));
+            return Err(CodexOAuthError::ParseError(
+                "当前账号缺少 id_token 中可证明的用户身份或 workspace，请重新认证".to_string(),
+            ));
         }
         Ok(())
     }
@@ -765,7 +760,9 @@ impl CodexOAuthManager {
             let workspace = Some(account.chatgpt_account_id.clone())
                 .filter(|id| !id.trim().is_empty())
                 .ok_or_else(|| {
-                    CodexOAuthError::ParseError(format!("当前账号缺少 workspace 身份，请重新认证"))
+                    CodexOAuthError::ParseError(
+                        "当前账号缺少 workspace 身份，请重新认证".to_string(),
+                    )
                 })?;
             (account.id_token.clone(), workspace)
         };
@@ -780,9 +777,9 @@ impl CodexOAuthManager {
         };
 
         if managed_workspace != live_refresh.chatgpt_account_id {
-            return Err(CodexOAuthError::TokenFetchFailed(format!(
-                "Codex OAuth 账号的 workspace 与磁盘凭据不一致，本次操作已取消"
-            )));
+            return Err(CodexOAuthError::TokenFetchFailed(
+                "Codex OAuth 账号的 workspace 与磁盘凭据不一致，本次操作已取消".to_string(),
+            ));
         }
         Ok(Some((
             live_refresh.refresh_token,
@@ -1055,9 +1052,7 @@ impl CodexOAuthManager {
                     return Err(Self::ambiguous_live_refresh_error(account_id));
                 }
                 RefreshTokenAdoptionOutcome::Adopted => {
-                    return Err(CodexOAuthError::TokenFetchFailed(format!(
-                        "Codex CLI 账号的磁盘凭据在准备写入期间已刷新；为避免写入混合 token bundle，本次操作已取消，请重试"
-                    )));
+                    return Err(CodexOAuthError::TokenFetchFailed("Codex CLI 账号的磁盘凭据在准备写入期间已刷新；为避免写入混合 token bundle，本次操作已取消，请重试".to_string()));
                 }
                 RefreshTokenAdoptionOutcome::NotManaged => {
                     return Err(CodexOAuthError::AccountNotFound(account_id.to_string()));
@@ -1135,13 +1130,9 @@ impl CodexOAuthManager {
         )
     }
 
-    /// Reconcile the same-account Codex CLI refresh generation before a
-    /// provider transaction overwrites or removes live auth.json.
-    ///
-    /// For an existing account, carries the refresh token observed on disk.
-    /// Callers compare it immediately before their live write/delete; the external Codex
-    /// CLI does not participate in cc-switch's switch lock and may refresh in
-    /// the adopt-to-write window.
+    /// Legacy reconciliation fixture: distinguish a deleted account from an
+    /// existing account and reject ambiguous live refresh generations.
+    #[cfg(test)]
     pub(crate) async fn prepare_live_auth_for_account_switch_away(
         &self,
         account_id: &str,
@@ -1157,13 +1148,13 @@ impl CodexOAuthManager {
             .read_managed_live_auth_refresh_for_account(account_id)
             .await?
         else {
-            return Ok(CodexLiveAuthSwitchGuard::ExistingAccount(None));
+            return Ok(CodexLiveAuthSwitchGuard::ExistingAccount);
         };
 
         let outcome = self
             .adopt_account_refresh_token_under_lock(
                 account_id,
-                live_refresh.clone(),
+                live_refresh,
                 live_id_token,
                 live_last_refresh_ms,
                 RefreshTokenAdoptionMode::TimestampChecked,
@@ -1173,9 +1164,9 @@ impl CodexOAuthManager {
         match outcome {
             RefreshTokenAdoptionOutcome::Synchronized { .. }
             | RefreshTokenAdoptionOutcome::Adopted
-            | RefreshTokenAdoptionOutcome::ProvablyOlder => Ok(
-                CodexLiveAuthSwitchGuard::ExistingAccount(Some(live_refresh)),
-            ),
+            | RefreshTokenAdoptionOutcome::ProvablyOlder => {
+                Ok(CodexLiveAuthSwitchGuard::ExistingAccount)
+            }
             RefreshTokenAdoptionOutcome::Ambiguous => {
                 Err(Self::ambiguous_live_refresh_error(account_id))
             }
@@ -1576,40 +1567,12 @@ impl CodexOAuthManager {
     }
 
     #[cfg(test)]
-    pub(crate) async fn test_cache_access_token(&self, account_id: &str, token: &str) {
-        assert!(self.accounts.read().await.contains_key(account_id));
-        let now = chrono::Utc::now().timestamp_millis();
-        self.access_tokens.write().await.insert(
-            account_id.to_string(),
-            CachedAccessToken {
-                token: token.to_string(),
-                expires_at_ms: now + 3_600_000,
-                obtained_at_ms: now,
-            },
-        );
-    }
-
-    #[cfg(test)]
     pub(crate) async fn test_refresh_token_for_account(&self, account_id: &str) -> Option<String> {
         self.accounts
             .read()
             .await
             .get(account_id)
             .map(|account| account.refresh_token.clone())
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn test_set_token_updated_at_ms(
-        &self,
-        account_id: &str,
-        token_updated_at_ms: i64,
-    ) {
-        self.accounts
-            .write()
-            .await
-            .get_mut(account_id)
-            .expect("test account present")
-            .token_updated_at_ms = token_updated_at_ms;
     }
 
     // ==================== 内部方法 ====================
@@ -1651,9 +1614,9 @@ impl CodexOAuthManager {
                 .ok_or_else(|| CodexOAuthError::AccountNotFound(account_id.clone()))?;
             let expected_workspace = existing.chatgpt_account_id.as_str();
             if expected_workspace != chatgpt_account_id {
-                return Err(CodexOAuthError::TokenFetchFailed(format!(
-                    "重新登录的 ChatGPT workspace 与当前账号 不一致"
-                )));
+                return Err(CodexOAuthError::TokenFetchFailed(
+                    "重新登录的 ChatGPT workspace 与当前账号 不一致".to_string(),
+                ));
             }
 
             let new_id_token = id_token.as_deref().ok_or_else(|| {
@@ -1669,9 +1632,9 @@ impl CodexOAuthManager {
             let user_identity_matches = match existing_subject.as_deref() {
                 Some(existing) if new_subject.as_deref() == Some(existing) => true,
                 Some(_) => {
-                    return Err(CodexOAuthError::TokenFetchFailed(format!(
-                        "重新登录的 ChatGPT 用户与当前账号 不一致"
-                    )));
+                    return Err(CodexOAuthError::TokenFetchFailed(
+                        "重新登录的 ChatGPT 用户与当前账号 不一致".to_string(),
+                    ));
                 }
                 None => {
                     let existing_email = existing
@@ -1690,9 +1653,9 @@ impl CodexOAuthManager {
                 }
             };
             if !user_identity_matches {
-                return Err(CodexOAuthError::TokenFetchFailed(format!(
-                    "无法确认重新登录的 ChatGPT 用户属于当前账号，原账号保持不变"
-                )));
+                return Err(CodexOAuthError::TokenFetchFailed(
+                    "无法确认重新登录的 ChatGPT 用户属于当前账号，原账号保持不变".to_string(),
+                ));
             }
         }
 
@@ -2225,19 +2188,6 @@ fn compute_expires_at_ms(expires_in: Option<i64>) -> i64 {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let secs = expires_in.unwrap_or(3600);
     now_ms + secs * 1000
-}
-
-fn extract_refresh_error_code(body: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(body).ok()?;
-    value
-        .get("error")
-        .and_then(|error| match error {
-            serde_json::Value::Object(object) => object.get("code").and_then(|code| code.as_str()),
-            serde_json::Value::String(code) => Some(code.as_str()),
-            _ => None,
-        })
-        .or_else(|| value.get("code").and_then(|code| code.as_str()))
-        .map(|code| code.to_ascii_lowercase())
 }
 
 /// 解析 JWT 中的 claims
