@@ -261,6 +261,14 @@ const TESTABLE_UNSUPPORTED_CFG =
 
 export const RUST_ALLOWANCE_CONTRACT = Object.freeze([
   Object.freeze({
+    id: "app-update-unsupported-host-rejection",
+    file: "src-tauri/src/services/app_update.rs",
+    condition: UNSUPPORTED_CFG,
+    next: "pub(crate) async fn install(_app: AppHandle, _version: String) -> Result<(), String> {",
+    block:
+      '#[cfg(not(any(target_os = "windows", target_os = "macos")))] pub(crate) async fn install(_app: AppHandle, _version: String) -> Result<(), String> { Err("当前平台不支持应用内更新，请打开下载页手动更新。".to_owned()) }',
+  }),
+  Object.freeze({
     id: "runtime-path-import",
     file: "src-tauri/src/codex_desktop_runtime.rs",
     condition: UNSUPPORTED_CFG,

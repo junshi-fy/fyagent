@@ -1426,6 +1426,35 @@ describe("Windows NSIS installer contract", () => {
     }
   });
 
+  it("waits at most five seconds only in update mode before retaining the process stop gate", () => {
+    const source = fs.readFileSync(TEMPLATE, "utf8");
+    const mutations = [
+      source.replace("StrCpy $FyAgentUpdateProcessRetries 0", ""),
+      source.replace("${AndIf} $FyAgentUpdateProcessRetries < 20", ""),
+      source.replace(
+        "${AndIf} $FyAgentUpdateProcessRetries < 20",
+        "${AndIf} $FyAgentUpdateProcessRetries < 200",
+      ),
+      source.replace(
+        "IntOp $FyAgentUpdateProcessRetries $FyAgentUpdateProcessRetries + 1",
+        "",
+      ),
+      source.replace("Sleep 250", "Sleep 2500"),
+      source.replace(
+        "${If} $UpdateMode = 1\n      ${AndIf} $FyAgentUpdateProcessRetries < 20",
+        "${If} $PassiveMode = 1\n      ${AndIf} $FyAgentUpdateProcessRetries < 20",
+      ),
+      source.replace("Var FyAgentUpdateProcessRetries\n", ""),
+    ];
+    expect(() => verifyTemplate(source)).not.toThrow();
+    for (const mutation of mutations) {
+      expect(mutation).not.toBe(source);
+      expect(() => verifyTemplate(mutation)).toThrow(
+        /process stop gate|retry counter/u,
+      );
+    }
+  });
+
   it("fails closed while the main or fixed helper process is running without force termination", () => {
     const source = fs.readFileSync(TEMPLATE, "utf8");
     const gateDefinition = source.match(

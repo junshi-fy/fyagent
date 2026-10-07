@@ -1,0 +1,63 @@
+.fy-app-update-panel {
+  display: grid;
+  gap: 12px;
+  color: var(--fy-text);
+  font-size: var(--fy-font-body);
+  border-top: 1px solid var(--fy-divider);
+  padding-top: 16px;
+}
+
+.fy-app-update-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fy-app-update-panel h3,
+.fy-app-update-panel p {
+  margin: 0;
+}
+
+.fy-app-update-panel h3 {
+  font-size: var(--fy-font-body);
+  font-weight: var(--fy-weight-semibold);
+}
+
+.fy-app-update-header p,
+.fy-app-update-notes {
+  color: var(--fy-text-secondary);
+}
+
+.fy-app-update-release {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fy-app-update-notes {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.fy-app-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fy-app-update-primary {
+  background: var(--fy-accent);
+  color: var(--fy-accent-ink);
+}
+
+.fy-app-update-error {
+  color: var(--fy-danger-text);
+}
+
+.fy-app-update-panel progress {
+  width: 100%;
+  accent-color: var(--fy-accent);
+}

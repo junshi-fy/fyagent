@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const overlayState = vi.hoisted(() => ({ show: false }));
@@ -11,6 +11,13 @@ vi.mock("@/shared/platform", async (importOriginal) => {
   };
 });
 
+import { FeatureProvider } from "@/shared/features/provider";
+import {
+  AppUpdateProvider,
+  useAppUpdate,
+} from "@/shared/features/app-update/provider";
+import { SKIPPED_APP_UPDATE_KEY } from "@/shared/features/app-update/useAppUpdateController";
+import { createBrowserFeaturePorts } from "@/shared/platform/browser/features";
 import { TooltipProvider } from "@/shared/ui/primitives";
 import { TopBar } from "@/widgets/app-shell/TopBar";
 
@@ -70,5 +77,54 @@ describe("TopBar macOS Overlay drag strip", () => {
     expect(
       screen.queryByRole("button", { name: "关闭" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("TopBar application update indicator", () => {
+  it("shows an accessible dot for an available version and removes it after skipping", async () => {
+    localStorage.clear();
+    const ports = createBrowserFeaturePorts();
+    let version = "0.4.11";
+    ports.settings.getAppVersion = async () => "0.4.10";
+    ports.appUpdate.check = async () => ({
+      currentVersion: "0.4.10",
+      update: { version, notes: null, date: null },
+    });
+    let controller!: ReturnType<typeof useAppUpdate>;
+    function Controls() {
+      controller = useAppUpdate();
+      return <TopBar />;
+    }
+    const view = render(
+      <FeatureProvider ports={ports}>
+        <AppUpdateProvider>
+          <TooltipProvider>
+            <Controls />
+          </TooltipProvider>
+        </AppUpdateProvider>
+      </FeatureProvider>,
+    );
+    expect(screen.getByRole("button", { name: "关于 FyAgent" })).toBeVisible();
+    expect(document.querySelector(".fy-app-update-dot")).toBeNull();
+    await act(() => controller.check());
+    expect(
+      screen.getByRole("button", { name: "关于 FyAgent，有新版本" }),
+    ).toBeVisible();
+    expect(document.querySelector(".fy-app-update-dot")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    act(() => controller.skipVersion());
+    expect(screen.getByRole("button", { name: "关于 FyAgent" })).toBeVisible();
+    expect(document.querySelector(".fy-app-update-dot")).toBeNull();
+    expect(localStorage.getItem(SKIPPED_APP_UPDATE_KEY)).toBe("0.4.11");
+    version = "0.4.12";
+    await act(() => controller.check());
+    expect(
+      screen.getByRole("button", { name: "关于 FyAgent，有新版本" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    view.unmount();
+    localStorage.clear();
   });
 });

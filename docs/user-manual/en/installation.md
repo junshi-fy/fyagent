@@ -13,6 +13,16 @@ On macOS, open the DMG, drag `FyAgent.app` into Applications, and launch it ther
 
 On first launch, choose a purpose for recommendations or select 「跳过引导」 (Skip guide). Follow [AI software configuration](agents.md) to scan and install software. MCP installation identifies required runtimes such as Node.js / npx or uv / uvx; prepare those before proceeding.
 
-To update FyAgent, download a matching package from the same Releases page and follow its instructions. To uninstall, use Windows Settings → Apps or move the macOS application to Trash. Personal data defaults to `~/.fyagent/`; back up anything you want to keep before changing those files.
+## In-app updates
+
+Once the update panel is connected, open About (「关于」) and select Check for updates (「检查更新」). FyAgent also checks after startup. A new version only adds a small red dot to the About button; it does not open a popup. Skip this version (「跳过这个版本」) hides its dot, while a later version will still be indicated. A manual check still shows a skipped version, so you can install it or undo the skip.
+
+Update now (「立即更新」) downloads the update, verifies its signature, then installs it and restarts FyAgent. Wait for any software installation task to finish before updating. On Windows, FyAgent stops its background helper before installation, and each update displays a “Do you want to allow this app to make changes?” prompt.
+
+The update panel is not yet connected to About, and signed update releases and the update manifest are not yet published. For now, download a matching package from the same Releases page and follow its instructions. When checking fails, Open download page (「打开下载页」) will also provide this manual fallback.
+
+## Uninstalling
+
+Use Windows Settings → Apps or move the macOS application to Trash. Personal data defaults to `~/.fyagent/`; back up anything you want to keep before changing those files.
 
 [Back to manual](README.md)

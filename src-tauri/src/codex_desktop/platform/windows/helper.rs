@@ -15,7 +15,7 @@ use std::{
         io::{AsRawHandle, FromRawHandle, OwnedHandle},
     },
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, OnceLock},
+    sync::{Arc, Condvar, Mutex, OnceLock, Weak},
     time::{Duration, Instant},
 };
 
@@ -700,9 +700,35 @@ fn generate_random_256(error_message: &'static str) -> Result<[u8; 32], Installe
     Ok(random)
 }
 
+// Weak references preserve the parent-owned cancellation authority without
+// retaining completed requests or opening named events from untrusted input.
+static HELPER_CANCEL_EVENTS: OnceLock<Mutex<Vec<Weak<ParentControlEvent>>>> = OnceLock::new();
+
+pub(crate) fn cancel_helpers_for_app_update() -> Result<(), String> {
+    let mut events = HELPER_CANCEL_EVENTS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .map_err(|_| "后台小助手状态不可用，应用更新已取消。".to_owned())?;
+    events.retain(|event| event.strong_count() != 0);
+    for event in events.iter().filter_map(Weak::upgrade) {
+        event
+            .signal()
+            .map_err(|_| "无法通知后台小助手正常结束，应用更新已取消。".to_owned())?;
+    }
+    Ok(())
+}
+
+/// Retain the same gate used by package/tool/readiness helper operations until
+/// update install exits. Quarantined lifetimes still fail closed and are never
+/// released by update UI. Ordinary completion is required to obtain this gate.
+pub(crate) fn reserve_helper_for_app_update() -> Result<impl Send, String> {
+    HelperGateLease::acquire()
+        .map_err(|_| "后台小助手仍在处理任务或需要恢复，请稍后重试或重启应用。".to_owned())
+}
+
 struct ParentControlEvents {
     admission: ParentControlEvent,
-    cancel: ParentControlEvent,
+    cancel: Arc<ParentControlEvent>,
 }
 
 impl ParentControlEvents {
@@ -717,11 +743,17 @@ impl ParentControlEvents {
             &admission_event_name(nonce),
             "the helper admission event could not be created",
         )?;
-        let cancel = ParentControlEvent::create(
+        let cancel = Arc::new(ParentControlEvent::create(
             shell_sid,
             &cancel_event_name(nonce),
             "the helper cancellation event could not be created",
-        )?;
+        )?);
+        let mut events = HELPER_CANCEL_EVENTS
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .map_err(|_| helper_quarantine_error())?;
+        events.retain(|event| event.strong_count() != 0);
+        events.push(Arc::downgrade(&cancel));
         Ok(Self { admission, cancel })
     }
 

@@ -767,6 +767,11 @@ impl CodexDesktopService {
         self.job_store.finalize_process_lifecycle_transition()
     }
 
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    pub(crate) fn abort_app_update_transition(&self) -> Result<bool, InstallerError> {
+        self.job_store.abort_app_update_transition()
+    }
+
     /// Atomically claims the process-local job slot and starts the worker only
     /// after returning the initial `Checking` snapshot to the caller.
     #[cfg(test)]

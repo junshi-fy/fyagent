@@ -237,6 +237,13 @@ export const handlers = [
   ),
 
   http.post(`${TAURI_ENDPOINT}/open_external`, () => success(true)),
+  http.post(`${TAURI_ENDPOINT}/check_app_update`, () =>
+    success({ currentVersion: "0.4.10", update: null }),
+  ),
+  // Fake acceptance never launches an updater installer or restarts the process.
+  http.post(`${TAURI_ENDPOINT}/install_app_update`, () =>
+    HttpResponse.json({ message: "测试环境不执行应用更新" }, { status: 409 }),
+  ),
 
   http.post(`${TAURI_ENDPOINT}/list_sessions`, () => success(listSessions())),
 

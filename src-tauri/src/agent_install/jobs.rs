@@ -22,12 +22,14 @@ struct JobRecord {
 #[derive(Default)]
 pub struct AgentActionJobStore {
     inner: Mutex<Option<JobRecord>>,
+    app_update_pending: AtomicBool,
 }
 
 impl AgentActionJobStore {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(None),
+            app_update_pending: AtomicBool::new(false),
         }
     }
 
@@ -50,6 +52,34 @@ impl AgentActionJobStore {
             .map(|job| job.snapshot.clone())
     }
 
+    #[cfg(any(target_os = "windows", target_os = "macos", test))]
+    pub(crate) fn has_active_job(&self) -> bool {
+        self.current().is_some_and(|job| !is_terminal(job.stage))
+    }
+
+    /// Serialize the update reservation with `start`, using its existing
+    /// mutex. The update owner releases this gate on every failed install.
+    #[cfg(any(target_os = "windows", target_os = "macos", test))]
+    pub(crate) fn reserve_for_app_update(&self) -> Result<(), AgentReasonCode> {
+        let guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard
+            .as_ref()
+            .is_some_and(|job| !is_terminal(job.snapshot.stage))
+            || self.app_update_pending.swap(true, Ordering::AcqRel)
+        {
+            return Err(AgentReasonCode::OperationConflict);
+        }
+        Ok(())
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos", test))]
+    pub(crate) fn release_app_update(&self) {
+        self.app_update_pending.store(false, Ordering::Release);
+    }
+
     pub fn start(
         &self,
         agent_id: AgentCatalogId,
@@ -60,6 +90,9 @@ impl AgentActionJobStore {
             .inner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.app_update_pending.load(Ordering::Acquire) {
+            return Err(AgentReasonCode::OperationConflict);
+        }
         if let Some(existing) = guard.as_ref() {
             if existing.snapshot.agent_id == agent_id
                 && existing.snapshot.reason_code == Some(AgentReasonCode::RecoveryRequired)
@@ -256,6 +289,56 @@ mod tests {
             Some(AgentReasonCode::RecoveryRequired)
         );
         assert_eq!(store.current(), Some(failed));
+    }
+
+    #[test]
+    fn app_update_reservation_blocks_new_jobs_and_releases_on_failure() {
+        let store = AgentActionJobStore::new();
+        assert!(!store.has_active_job());
+        store.reserve_for_app_update().unwrap();
+        assert!(store.reserve_for_app_update().is_err());
+        assert_eq!(
+            store
+                .start(
+                    AgentCatalogId::QoderWork,
+                    AgentActionId::Install,
+                    AgentSurface::Desktop
+                )
+                .err(),
+            Some(AgentReasonCode::OperationConflict)
+        );
+        store.release_app_update();
+        assert!(store
+            .start(
+                AgentCatalogId::QoderWork,
+                AgentActionId::Install,
+                AgentSurface::Desktop
+            )
+            .is_ok());
+        assert!(store.has_active_job());
+        assert_eq!(
+            store.reserve_for_app_update().err(),
+            Some(AgentReasonCode::OperationConflict)
+        );
+    }
+
+    #[test]
+    fn app_update_reservation_admits_terminal_jobs_without_changing_their_result() {
+        let store = AgentActionJobStore::new();
+        let (job, _) = store
+            .start(
+                AgentCatalogId::QoderWork,
+                AgentActionId::Install,
+                AgentSurface::Desktop,
+            )
+            .unwrap();
+        let terminal = store
+            .transition(&job.job_id, AgentActionJobStage::Succeeded, None)
+            .unwrap();
+        store.reserve_for_app_update().unwrap();
+        assert_eq!(store.current(), Some(terminal));
+        store.release_app_update();
+        assert!(!store.has_active_job());
     }
 
     #[test]

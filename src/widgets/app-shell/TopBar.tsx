@@ -1,4 +1,5 @@
 import { lazy, Suspense, useRef, useState } from "react";
+import { useOptionalAppUpdate } from "../../shared/features/app-update/provider";
 import { classNames } from "../../shared/design-system/classNames";
 import { shouldShowMacOverlayDragStrip } from "../../shared/platform";
 import { Button } from "../../shared/ui/Button";
@@ -9,6 +10,7 @@ import "./top-bar-actions.css";
 const AboutDialog = lazy(() => import("./AboutDialog"));
 
 export function TopBar() {
+  const hasUpdate = useOptionalAppUpdate()?.hasUpdate ?? false;
   const showMacOverlayDragStrip = shouldShowMacOverlayDragStrip();
   const [aboutOpen, setAboutOpen] = useState<boolean | null>(null);
   const aboutOrigin = useRef<HTMLElement | null>(null);
@@ -38,7 +40,7 @@ export function TopBar() {
           <ThemeToggle />
           <Button
             className="fy-about-trigger"
-            aria-label="关于 FyAgent"
+            aria-label={hasUpdate ? "关于 FyAgent，有新版本" : "关于 FyAgent"}
             aria-haspopup="dialog"
             dialogOriginRef={aboutOrigin}
             onClick={() => {
@@ -46,6 +48,9 @@ export function TopBar() {
             }}
           >
             关于
+            {hasUpdate ? (
+              <span className="fy-app-update-dot" aria-hidden="true" />
+            ) : null}
           </Button>
         </div>
       </div>

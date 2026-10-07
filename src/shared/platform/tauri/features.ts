@@ -1,3 +1,4 @@
+import { createAppUpdatePort } from "./feature-ports/appUpdate";
 import type { FeaturePorts } from "../../features/ports";
 import { createAgentAuthPort } from "./feature-ports/agentAuth";
 import { createAgentFeaturePorts } from "./feature-ports/agents";
@@ -37,6 +38,7 @@ export function createTauriFeaturePorts(): FeaturePorts {
     return createSessionMigrationPort();
   };
   return {
+    appUpdate: createAppUpdatePort(),
     configPack: {
       list: async (...args) => (await configPack()).list(...args),
       pickFile: async (...args) => (await configPack()).pickFile(...args),

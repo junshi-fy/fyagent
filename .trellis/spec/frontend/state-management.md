@@ -53,8 +53,11 @@ resource-specific cache policy to every query or add component interval owners.
 Avoid render-phase state synchronization except the reviewed keep-alive route,
 hidden-search snapshot and Dialog presence-registration owners. Their guarded
 adjustments preserve a specific lifetime, not a second `currentView` store.
-The host updater remains removed: do not add an update provider, automatic
-download, migration bypass or renderer-written native settings during cleanup.
+Host updates have an independent `shared/features/app-update` provider and
+narrow FeaturePorts adapter. Automatic checks only indicate a new version in
+the shell; download/install requires a user action. Version skips are local
+preferences. Do not add automatic downloads, migration bypasses or renderer-written
+native settings during cleanup.
 
 ## 4. Validation & Error Matrix
 

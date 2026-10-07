@@ -1,3 +1,4 @@
+pub(crate) mod app_update;
 mod auto_sync;
 pub(crate) mod balance;
 pub(crate) mod change_plan;

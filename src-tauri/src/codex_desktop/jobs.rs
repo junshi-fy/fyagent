@@ -147,6 +147,8 @@ impl JobController {
 pub(crate) enum ProcessLifecycleTransition {
     Exit,
     Restart,
+    #[cfg(any(target_os = "windows", target_os = "macos", test))]
+    Update,
 }
 
 /// Result of atomically claiming the process lifecycle slot.
@@ -199,6 +201,22 @@ impl ProcessLifecycleCoordinator {
             ProcessLifecycleState::Finalizing(selected) => {
                 ProcessLifecycleClaim::CleanupInProgress(selected)
             }
+        }
+    }
+
+    /// Only the update owner may abandon its fallible install transition.
+    /// Exit/restart ownership and committed ordinary cleanup remain immutable.
+    #[cfg(any(target_os = "windows", target_os = "macos", test))]
+    pub(crate) fn abort_update(&mut self) -> bool {
+        if matches!(
+            self.state,
+            ProcessLifecycleState::Cleaning(ProcessLifecycleTransition::Update)
+                | ProcessLifecycleState::Finalizing(ProcessLifecycleTransition::Update)
+        ) {
+            self.state = ProcessLifecycleState::Idle;
+            true
+        } else {
+            false
         }
     }
 
@@ -340,6 +358,11 @@ impl JobStore {
             ));
         }
         Ok(state.process_lifecycle.finalize())
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos", test))]
+    pub(crate) fn abort_app_update_transition(&self) -> Result<bool, InstallerError> {
+        Ok(self.lock_state()?.process_lifecycle.abort_update())
     }
 
     /// Obtains the cancellation signal for the current job.  Service workers
@@ -789,6 +812,66 @@ mod tests {
         let second = store.try_start(release(), "t5").unwrap();
         assert_ne!(first.job_id, second.job_id);
         assert_eq!(second.sequence, 0);
+    }
+
+    #[test]
+    fn failed_update_releases_its_claim_and_unblocks_installers() {
+        let store = JobStore::new();
+        assert_eq!(
+            store
+                .claim_process_lifecycle_transition(ProcessLifecycleTransition::Update)
+                .unwrap(),
+            ProcessLifecycleClaim::StartCleanup(ProcessLifecycleTransition::Update)
+        );
+        assert!(store.try_start(release(), "blocked").is_err());
+        assert_eq!(
+            store
+                .claim_process_lifecycle_transition(ProcessLifecycleTransition::Exit)
+                .unwrap(),
+            ProcessLifecycleClaim::CleanupInProgress(ProcessLifecycleTransition::Update)
+        );
+        assert!(store.abort_app_update_transition().unwrap());
+        assert!(store.try_start(release(), "after failure").is_ok());
+    }
+
+    #[test]
+    fn update_abort_cannot_release_an_exit_or_restart_owner() {
+        for transition in [
+            ProcessLifecycleTransition::Exit,
+            ProcessLifecycleTransition::Restart,
+        ] {
+            let mut coordinator = ProcessLifecycleCoordinator::new();
+            coordinator.claim(transition);
+            assert!(!coordinator.abort_update());
+            assert_eq!(coordinator.finalize(), Some(transition));
+            assert!(!coordinator.abort_update());
+        }
+        let mut coordinator = ProcessLifecycleCoordinator::new();
+        coordinator.claim(ProcessLifecycleTransition::Update);
+        assert_eq!(
+            coordinator.finalize(),
+            Some(ProcessLifecycleTransition::Update)
+        );
+        assert!(coordinator.abort_update());
+        assert_eq!(
+            coordinator.claim(ProcessLifecycleTransition::Restart),
+            ProcessLifecycleClaim::StartCleanup(ProcessLifecycleTransition::Restart)
+        );
+    }
+
+    #[test]
+    fn update_claim_rejects_active_desktop_installs() {
+        let store = JobStore::new();
+        let job = store.try_start(release(), "before update").unwrap();
+        assert_eq!(
+            store
+                .claim_process_lifecycle_transition(ProcessLifecycleTransition::Update)
+                .unwrap_err()
+                .code(),
+            InstallerErrorCode::JobAlreadyRunning
+        );
+        assert_eq!(store.get().unwrap().unwrap().job_id, job.job_id);
+        assert!(!store.abort_app_update_transition().unwrap());
     }
 
     #[test]

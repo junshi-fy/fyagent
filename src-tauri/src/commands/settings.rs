@@ -259,6 +259,20 @@ fn claim_process_lifecycle_transition(
     })
 }
 
+/// Read only the application-owned update metadata, without plugin IPC authority.
+#[tauri::command]
+pub async fn check_app_update(
+    app: AppHandle,
+) -> Result<crate::services::app_update::AppUpdateCheck, String> {
+    crate::services::app_update::check(&app).await
+}
+
+/// Install only the version the user has explicitly confirmed.
+#[tauri::command]
+pub async fn install_app_update(app: AppHandle, version: String) -> Result<(), String> {
+    crate::services::app_update::install(app, version).await
+}
+
 /// 获取 app_config_dir 覆盖配置 (从 Store)
 #[tauri::command]
 pub async fn get_app_config_dir_override(app: AppHandle) -> Result<Option<String>, String> {

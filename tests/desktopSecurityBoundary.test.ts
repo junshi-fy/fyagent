@@ -79,6 +79,12 @@ describe("desktop IPC capability and CSP boundary", () => {
     expect(capability.permissions).not.toContain("dialog:default");
     expect(capability.permissions).not.toContain("log:default");
     expect(capability.permissions).not.toContain("process:default");
+    expect(capability.permissions).not.toContain("updater:default");
+    expect(
+      capability.permissions.some((permission) =>
+        permission.startsWith("updater:"),
+      ),
+    ).toBe(false);
     expect(capability.permissions).not.toContain("process:allow-restart");
   });
 

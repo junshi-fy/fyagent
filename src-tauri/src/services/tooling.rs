@@ -20,6 +20,16 @@ pub(crate) use claude::ClaudeLifecycleError;
 pub(crate) use health::observe_local_tool_health;
 static CLI_LIFECYCLE_WRITER: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// Hold the existing CLI writer through update installation so neither a
+/// running CLI installer nor a newly started one races application cleanup.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+pub(crate) fn reserve_cli_lifecycle_for_app_update(
+) -> Result<tokio::sync::MutexGuard<'static, ()>, String> {
+    CLI_LIFECYCLE_WRITER
+        .try_lock()
+        .map_err(|_| "CLI 安装或更新任务仍在运行，请等待任务结束后再更新应用。".to_owned())
+}
+
 pub(crate) async fn preflight_cli_lifecycle(
     agent: crate::services::external_agents::AgentCatalogId,
     action: crate::agent_install::AgentActionId,

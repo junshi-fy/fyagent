@@ -717,6 +717,7 @@ function assertProcessStopGateContract(source, blocks) {
     "process stop gate macro must be defined before its first invocation",
   );
   const expectedGateLines = [
+    "StrCpy $FyAgentUpdateProcessRetries 0",
     "fyagent_${Label}_process_retry:",
     '!if "${INSTALLMODE}" == "currentUser"',
     'nsis_tauri_utils::FindProcessCurrentUser "${ExecutableName}"',
@@ -725,6 +726,12 @@ function assertProcessStopGateContract(source, blocks) {
     "!endif",
     "Pop $R0",
     "${If} $R0 = 0",
+    "${If} $UpdateMode = 1",
+    "${AndIf} $FyAgentUpdateProcessRetries < 20",
+    "IntOp $FyAgentUpdateProcessRetries $FyAgentUpdateProcessRetries + 1",
+    "Sleep 250",
+    "Goto fyagent_${Label}_process_retry",
+    "${EndIf}",
     "IfSilent fyagent_${Label}_process_silent fyagent_${Label}_process_interactive",
     "fyagent_${Label}_process_interactive:",
     "${If} $PassiveMode = 1",
@@ -740,7 +747,13 @@ function assertProcessStopGateContract(source, blocks) {
   contract(
     JSON.stringify(nonEmptyTrimmedLines(gateMatch?.[1] ?? "")) ===
       JSON.stringify(expectedGateLines),
-    "process stop gate must retain exact find-only, retry/cancel, passive/silent Abort control flow",
+    "process stop gate must retain exact find-only, update-only bounded wait, retry/cancel, passive/silent Abort control flow",
+  );
+  contract(
+    nonEmptyTrimmedLines(executableSource).filter(
+      (line) => line === "Var FyAgentUpdateProcessRetries",
+    ).length === 1,
+    "update process wait must declare exactly one dedicated retry counter",
   );
   contract(
     !/(?:CheckIfAppIsRunning|KillProcess(?:CurrentUser)?|TerminateProcess|\btaskkill(?:\.exe)?\b)/iu.test(

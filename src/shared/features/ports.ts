@@ -271,6 +271,7 @@ export interface MemoryPort {
 }
 
 export interface FeaturePorts {
+  appUpdate: import("./app-update/types").AppUpdatePort;
   configPack: import("./config-pack").ConfigPackPort;
   health: HealthPort;
   configRecovery: import("./config-recovery").ConfigRecoveryPort;

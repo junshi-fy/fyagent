@@ -1,0 +1,35 @@
+{
+  "name": "one-click-update",
+  "status": "in_progress",
+  "branch": "feat/one-click-update",
+  "summary": "实现已冻结；本轮修复工作站路径和设计 token 合同；关于页和流水线后续接入；Rust 验证待分叉 CI",
+  "implementation": "complete",
+  "verification": "pending_ci",
+  "verification_results": {
+    "outside_sandbox": {
+      "source": "用户实际运行并提供，完整单测为本轮修复前结果",
+      "supported_platform_check": "通过，3125 current files",
+      "typecheck": "通过",
+      "lint": "通过",
+      "format_check": "通过",
+      "git_diff_check": "通过",
+      "unit": "217 个文件中 8 个失败、29 项失败；本轮修复 repositoryWorkstationPathContract 和 designTokens 两处合同问题",
+      "remaining_failures": "miseTaskContract 21 项因 mise.toml 未 trust；developmentEnvironment、taskDocs、systemCheck、windowsMsvcCross 2 项属于本机环境原因；repositoryGovernanceScan 在未改动的 main 上同样失败"
+    },
+    "this_round": {
+      "unit": "4 个文件：3 通过、1 失败；12 项：11 通过、1 失败；designTokens、TopBar、app-update-panel 全部通过；路径合同的语义占位用例通过，仓库扫描因 spawnSync git EPERM 失败，待用户沙箱外复跑",
+      "workstation_paths": "code_audit：任务目录及维护说明的工作站路径扫描无匹配",
+      "prettier_check": "本轮 3 个修改文件通过",
+      "git_diff_check": "通过"
+    },
+    "cargo_lock": "用户已用 cargo metadata 更新，新增 tauri-plugin-updater 2.12.0 等依赖",
+    "rust": "编译、clippy、cargo test 尚未运行，待分叉 CI"
+  },
+  "deliverables": [
+    "src-tauri/src/services/app_update.rs",
+    "src-tauri/src/platform/app_update.rs",
+    "src/shared/features/app-update/AppUpdatePanel.tsx",
+    "docs/fyagent/app-update-maintenance.md"
+  ],
+  "acceptance_evidence": ".trellis/tasks/10-08-one-click-update/acceptance.md"
+}

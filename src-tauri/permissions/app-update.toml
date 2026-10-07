@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-app-update"
+description = "Check the signed FyAgent release and install the confirmed version through the coordinated application lifecycle. No generic updater plugin API is exposed."
+commands.allow = ["check_app_update", "install_app_update"]

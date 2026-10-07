@@ -1097,6 +1097,21 @@ pub fn run() {
                 log::info!("=== FyAgent v{} started ===", env!("CARGO_PKG_VERSION"));
             }
 
+            // Desktop registration follows the upstream failure policy: the app
+            // remains usable when updater configuration cannot initialize.
+            #[cfg(desktop)]
+            match app
+                .handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())
+            {
+                Ok(()) => {
+                    app.manage(services::app_update::AppUpdaterAvailable);
+                }
+                Err(error) => {
+                    log::warn!("初始化应用更新插件失败，已跳过：{error}");
+                }
+            }
+
             // 首次读取覆盖路径时 logger 尚未可用；此处重放一次，
             // 让 Store 损坏或路径无效等启动警告能够真正落盘。
             let _ = app_store::refresh_app_config_dir_override(app.handle());
@@ -2116,6 +2131,8 @@ pub fn run() {
             commands::get_log_config,
             commands::set_log_config,
             commands::restart_app,
+            commands::check_app_update,
+            commands::install_app_update,
             commands::exit_app,
             commands::is_portable_mode,
             commands::copy_text_to_clipboard,
@@ -2671,6 +2688,36 @@ pub(crate) fn claim_process_lifecycle_transition(
         })
 }
 
+/// Abort is restricted to an update-owned receipt. Ordinary lifecycle owners
+/// cannot be reset by a failed installer or by a duplicate renderer request.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+pub(crate) fn abort_app_update_transition(
+    app_handle: &tauri::AppHandle,
+    receipt: ProcessLifecycleClaimReceipt,
+) -> Result<(), String> {
+    if receipt.claim != ProcessLifecycleClaim::StartCleanup(ProcessLifecycleTransition::Update) {
+        return Err("应用更新未持有生命周期，无法安全恢复。".to_owned());
+    }
+    match receipt.origin {
+        ProcessLifecycleCoordinatorOrigin::Service => {
+            let state = app_handle
+                .try_state::<store::AppState>()
+                .ok_or_else(|| "应用安装状态不可用，请重启应用。".to_owned())?;
+            state
+                .codex_desktop_service
+                .abort_app_update_transition()
+                .map_err(|_| "应用更新状态恢复失败，请重启应用。".to_owned())?;
+        }
+        ProcessLifecycleCoordinatorOrigin::PreApp => {
+            PRE_APP_PROCESS_LIFECYCLE
+                .lock()
+                .map_err(|_| "应用更新状态恢复失败，请重启应用。".to_owned())?
+                .abort_update();
+        }
+    }
+    Ok(())
+}
+
 fn claim_process_lifecycle_transition_for_exit(
     app_handle: &tauri::AppHandle,
 ) -> Result<ProcessLifecycleClaimReceipt, crate::codex_desktop::error::InstallerError> {
@@ -2701,11 +2748,38 @@ pub(crate) fn start_process_lifecycle_cleanup(
     receipt: ProcessLifecycleClaimReceipt,
     response_delay: std::time::Duration,
 ) {
+    start_retained_process_lifecycle_cleanup(app_handle, receipt, response_delay, ());
+}
+
+/// Keep the update's Agent/CLI reservations alive until the shared worker
+/// actually exits. Dropping them when the IPC response returns would admit a
+/// new installer while the async cleanup was still running.
+#[cfg(target_os = "macos")]
+pub(crate) fn start_app_update_cleanup<G: Send + 'static>(
+    app_handle: tauri::AppHandle,
+    receipt: ProcessLifecycleClaimReceipt,
+    reservations: G,
+) {
+    start_retained_process_lifecycle_cleanup(
+        app_handle,
+        receipt,
+        std::time::Duration::ZERO,
+        reservations,
+    );
+}
+
+fn start_retained_process_lifecycle_cleanup<G: Send + 'static>(
+    app_handle: tauri::AppHandle,
+    receipt: ProcessLifecycleClaimReceipt,
+    response_delay: std::time::Duration,
+    reservations: G,
+) {
     if !matches!(receipt.claim, ProcessLifecycleClaim::StartCleanup(_)) {
         log::warn!("Ignored process lifecycle cleanup start without ownership");
         return;
     }
     tauri::async_runtime::spawn(async move {
+        let _reservations = reservations;
         if !response_delay.is_zero() {
             tokio::time::sleep(response_delay).await;
         }
@@ -2759,7 +2833,12 @@ pub(crate) fn start_process_lifecycle_cleanup(
             },
         };
 
-        if selected_transition == ProcessLifecycleTransition::Restart {
+        let should_restart = selected_transition == ProcessLifecycleTransition::Restart;
+        #[cfg(any(target_os = "windows", target_os = "macos", test))]
+        let should_restart =
+            should_restart || selected_transition == ProcessLifecycleTransition::Update;
+        if should_restart {
+            remove_tray_icon_before_exit(&app_handle);
             log::info!("清理完成，重启应用");
             app_handle.restart();
         }

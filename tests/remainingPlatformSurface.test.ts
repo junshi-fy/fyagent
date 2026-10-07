@@ -862,7 +862,7 @@ describe("durable supported-platform surface contract", () => {
       (item): item is RustAllowance & { block: string } =>
         Boolean(item.block) && !item.id.startsWith("session-migration-"),
     );
-    expect(guarded).toHaveLength(4);
+    expect(guarded).toHaveLength(5);
     for (const allowance of guarded) {
       const pattern = new RegExp(
         allowance.block
@@ -953,7 +953,7 @@ describe("durable supported-platform surface contract", () => {
 
   it("freezes every fail-closed Rust allowance by file, condition, and adjacent structure", () => {
     const entries = permittedRustEntries();
-    expect(checker.RUST_ALLOWANCE_CONTRACT).toHaveLength(47);
+    expect(checker.RUST_ALLOWANCE_CONTRACT).toHaveLength(48);
     expect(checker.scanRustImplicitPredicates(entries)).toEqual([]);
 
     const first = checker.RUST_ALLOWANCE_CONTRACT[0];

@@ -112,12 +112,14 @@ Var UpdateMode
 Var NoShortcutMode
 Var OldMainBinaryName
 Var LegacyWixInstallDir
+Var FyAgentUpdateProcessRetries
 
 ; Never force-terminate a process that may own an admitted installer job or its
 ; verified package handle. Interactive users may close it normally and retry;
 ; passive/silent callers fail before any migration, cleanup, or payload write.
 ; Keep this definition above PageLeaveReinstall, its first expansion site.
 !macro FyAgentRequireProcessStopped ExecutableName DisplayName Label
+  StrCpy $FyAgentUpdateProcessRetries 0
   fyagent_${Label}_process_retry:
     !if "${INSTALLMODE}" == "currentUser"
       nsis_tauri_utils::FindProcessCurrentUser "${ExecutableName}"
@@ -126,6 +128,15 @@ Var LegacyWixInstallDir
     !endif
     Pop $R0
     ${If} $R0 = 0
+      ; The updater starts NSIS before its parent process exits. Only /UPDATE
+      ; waits for that ordering window: 20 x 250ms, then the normal safe abort.
+      ; Ordinary install/uninstall remains immediate and never terminates a PID.
+      ${If} $UpdateMode = 1
+      ${AndIf} $FyAgentUpdateProcessRetries < 20
+        IntOp $FyAgentUpdateProcessRetries $FyAgentUpdateProcessRetries + 1
+        Sleep 250
+        Goto fyagent_${Label}_process_retry
+      ${EndIf}
       IfSilent fyagent_${Label}_process_silent fyagent_${Label}_process_interactive
 
       fyagent_${Label}_process_interactive:

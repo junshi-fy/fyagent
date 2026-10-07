@@ -11,7 +11,7 @@
     ],
     [
       "scripts/release/verify-windows-nsis-contract.mjs",
-      "5b1b3cfdf819a19edf7334a8f8da2f354a013d549fefcfc6a726762ba20f97c3"
+      "009a242c7a7c55042b1ccec8f9dbab51c0e83a6674739d40991dcef20eebd315"
     ],
     [
       "scripts/release/windows-signing.mjs",
@@ -31,7 +31,7 @@
     ],
     [
       "scripts/tasks/supported-platform-check.mjs",
-      "086e8d3af807904bba68d15d9798b47ee589f94564e6e53ec5c101232465d268"
+      "cc5beff8b42c78d974e3b48d4d5170b1ac65083f2fba7845f628b930790c458a"
     ],
     [
       "scripts/tasks/system-check.mjs",
@@ -55,7 +55,7 @@
     ],
     [
       "src-tauri/Cargo.toml",
-      "df3db7c1b7f6a45c0f6b91085119a92683af334a8bf7b0f8ca5b2574d9a8191b"
+      "8f1d82dfe89cb7cc2f1cc90a39598cd065c5ae8cbf9417a6ea870b09b4c94b02"
     ],
     [
       "src-tauri/src/agent_install/desktop.rs",
@@ -64,6 +64,10 @@
     [
       "src-tauri/src/agent_install/inventory.rs",
       "10bcb20756bd226d3da48c236afda50b512ab41e41e67f618c891869e8118820"
+    ],
+    [
+      "src-tauri/src/agent_install/jobs.rs",
+      "df8ee9e44509a02aad53cd90097a260696c1a9d9ea724070545fff156364864e"
     ],
     [
       "src-tauri/src/agent_install/macos.rs",
@@ -118,6 +122,10 @@
       "84730bc1a83a839ceec9885ab55df6e73da1f3a642cf91bf24cba5178b960476"
     ],
     [
+      "src-tauri/src/codex_desktop/jobs.rs",
+      "62c2c95829d373c3d1c71ada145548f4180687826576cd45ec5046e95bb192bc"
+    ],
+    [
       "src-tauri/src/codex_desktop/platform.rs",
       "16e658a257e5c3ccbb44a437be62e0f525ad1c632f7da1a67a6a0f8acabc4585"
     ],
@@ -135,7 +143,7 @@
     ],
     [
       "src-tauri/src/codex_desktop/platform/windows/mod.rs",
-      "acdddcc1ed372213201fb4d58e6af151c55b08ac0fb00c1f8f61ba8254ab1e86"
+      "4d7bcc25fed295c7f8d98dc5ec7bbdc932c51f4acee0f55d48552ba0615a0edd"
     ],
     [
       "src-tauri/src/codex_desktop/temp.rs",
@@ -171,7 +179,7 @@
     ],
     [
       "src-tauri/src/lib.rs",
-      "2d15ac7411f371c458a0c0bc3296388b6c44b2e403837d9573ce88fa9788a82a"
+      "b1e5ddbfe5832f33f981c8d6bb75f8db6f7791bda78be08f5bb0b8a1ecb7d052"
     ],
     [
       "src-tauri/src/lightweight.rs",
@@ -202,8 +210,12 @@
       "7e2bcc0ffb4c075c4e395ad8ae38971e8cb892dcbaf60176e0538ddb7be18e99"
     ],
     [
+      "src-tauri/src/platform/app_update.rs",
+      "542dd34829cd9deba2c07f7ee30dbcc74692f227d220bf2c609766a9e553c540"
+    ],
+    [
       "src-tauri/src/platform/mod.rs",
-      "2f2833f5ffd8fbdc3da86943dcfd9f49cfd3aa1fb3a9f8cec94ce17174fb0f1c"
+      "afeeab0f7c4840c9839a5f7281f3bf790022119c981a83350ee2fd51f8e7ff93"
     ],
     [
       "src-tauri/src/platform/process_launch.rs",
@@ -220,6 +232,14 @@
     [
       "src-tauri/src/proxy/providers/xai_oauth_auth.rs",
       "37654d2a840aabdd23cc5aa3cfa2bb4cd7e04d2d413db2e310b752de408403eb"
+    ],
+    [
+      "src-tauri/src/services/app_update.rs",
+      "04b500645166a4952e455706bdc6c6b3050e477ade1e58ac2e8715604a353c63"
+    ],
+    [
+      "src-tauri/src/services/codex_desktop/mod.rs",
+      "332af925f5464123e312c4dc2bc2c5fcdd0d84ba48b3682e06682611da29f471"
     ],
     [
       "src-tauri/src/services/config_pack/files.rs",
@@ -291,7 +311,7 @@
     ],
     [
       "src-tauri/src/services/tooling.rs",
-      "e218b9fd92e204cc1d627bea2d3dcd4c9b3ffc72136652cbd515aa3283d472bd"
+      "0c2e6012b80215b938337c57b073b81d2930f884a01c76653ed41711787d84e6"
     ],
     [
       "src-tauri/src/services/tooling/claude.rs",
@@ -475,7 +495,7 @@
     ],
     [
       "tests/remainingPlatformSurface.test.ts",
-      "71e2de3fb37459987893092996b55b8b9a79f0bea0e7e44a13212312c3d09ee4"
+      "d33638472fa5207aa5b72540c6969bec9c7fe86810dd621a3a84c195740aba7e"
     ],
     [
       "tests/singleInstanceActivationContract.test.ts",

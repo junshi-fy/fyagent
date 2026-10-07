@@ -1370,6 +1370,7 @@ mod tests {
             "allow-change-plan",
             "allow-agent-install-readiness",
             "allow-session-migration",
+            "allow-app-update",
         ] {
             assert_eq!(
                 permissions
@@ -1422,6 +1423,7 @@ mod tests {
         for manifest in [
             include_str!("../../permissions/config-pack.toml"),
             include_str!("../../permissions/session-migration.toml"),
+            include_str!("../../permissions/app-update.toml"),
         ] {
             let commands = allowed_commands(manifest);
             assert!(allowed.is_disjoint(&commands));
@@ -1447,7 +1449,7 @@ mod tests {
         assert!(registered.contains("get_agent_health"));
         assert!(registered.contains("get_first_use_guide_state"));
         assert!(registered.contains("dismiss_first_use_guide"));
-        assert_eq!(registered.len(), 396, "review intentional handler changes");
+        assert_eq!(registered.len(), 398, "review intentional handler changes");
         assert_eq!(allowed, registered, "every registered application command must be granted exactly once while an app ACL manifest exists");
     }
 }

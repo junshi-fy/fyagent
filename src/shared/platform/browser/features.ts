@@ -8,6 +8,11 @@ const rejectNativeOnly = async (): Promise<never> => {
 
 export function createBrowserFeaturePorts(): FeaturePorts {
   return {
+    appUpdate: {
+      check: rejectNativeOnly,
+      install: rejectNativeOnly,
+      subscribeProgress: async () => () => undefined,
+    },
     configPack: {
       list: rejectNativeOnly,
       pickFile: rejectNativeOnly,

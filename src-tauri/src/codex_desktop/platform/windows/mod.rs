@@ -53,7 +53,8 @@ pub use deployment::SystemWindowsPackageManager;
 #[cfg(target_os = "windows")]
 #[cfg_attr(test, allow(unused_imports))]
 pub(crate) use helper::{
-    run_claude_tool_operation, run_grok_tool_operation, run_verified_agent_exe_installer,
+    cancel_helpers_for_app_update, reserve_helper_for_app_update, run_claude_tool_operation,
+    run_grok_tool_operation, run_verified_agent_exe_installer,
 };
 
 trait WindowsVerifiedFilePin: Send {
