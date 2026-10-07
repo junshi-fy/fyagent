@@ -58,13 +58,15 @@ afterEach(() => {
 
 describe("application update lifetime", () => {
   it("waits eight seconds and checks at most once per 24 hours", async () => {
+    expect(APP_UPDATE_STARTUP_DELAY).toBe(8_000);
+    expect(APP_UPDATE_CHECK_INTERVAL).toBe(86_400_000);
     const state = setup();
-    await act(() => vi.advanceTimersByTimeAsync(APP_UPDATE_STARTUP_DELAY - 1));
+    await act(() => vi.advanceTimersByTimeAsync(7_999));
     expect(state.check).not.toHaveBeenCalled();
     await act(() => vi.advanceTimersByTimeAsync(1));
     expect(state.check).toHaveBeenCalledTimes(1);
     expect(state.result.current.hasUpdate).toBe(true);
-    await act(() => vi.advanceTimersByTimeAsync(APP_UPDATE_CHECK_INTERVAL - 1));
+    await act(() => vi.advanceTimersByTimeAsync(86_399_999));
     expect(state.check).toHaveBeenCalledTimes(1);
     await act(() => vi.advanceTimersByTimeAsync(1));
     expect(state.check).toHaveBeenCalledTimes(2);
@@ -78,11 +80,11 @@ describe("application update lifetime", () => {
       .mockImplementation(() => undefined);
     const state = setup();
     state.check.mockRejectedValue(new Error("网络不可用"));
-    await act(() => vi.advanceTimersByTimeAsync(APP_UPDATE_STARTUP_DELAY));
+    await act(() => vi.advanceTimersByTimeAsync(8_000));
     expect(state.result.current.error).toBeNull();
     expect(state.result.current.hasUpdate).toBe(false);
     expect(warning).toHaveBeenCalledOnce();
-    await act(() => vi.advanceTimersByTimeAsync(APP_UPDATE_CHECK_INTERVAL - 1));
+    await act(() => vi.advanceTimersByTimeAsync(86_399_999));
     expect(state.check).toHaveBeenCalledTimes(1);
     await act(() => vi.advanceTimersByTimeAsync(1));
     expect(state.check).toHaveBeenCalledTimes(2);
@@ -114,13 +116,9 @@ describe("application update lifetime", () => {
   it("manual checks postpone automatic checks and concurrent requests do not duplicate", async () => {
     const state = setup();
     await act(() => state.result.current.check());
-    await act(() => vi.advanceTimersByTimeAsync(APP_UPDATE_STARTUP_DELAY));
+    await act(() => vi.advanceTimersByTimeAsync(8_000));
     expect(state.check).toHaveBeenCalledTimes(1);
-    await act(() =>
-      vi.advanceTimersByTimeAsync(
-        APP_UPDATE_CHECK_INTERVAL - APP_UPDATE_STARTUP_DELAY,
-      ),
-    );
+    await act(() => vi.advanceTimersByTimeAsync(86_392_000));
     expect(state.check).toHaveBeenCalledTimes(2);
     let resolve!: (value: AppUpdateCheck) => void;
     state.check.mockImplementation(
@@ -154,10 +152,10 @@ describe("application update lifetime", () => {
     const hook = renderHook(() => useAppUpdateController(port, getVersion), {
       wrapper,
     });
-    await act(() => vi.advanceTimersByTimeAsync(APP_UPDATE_STARTUP_DELAY));
+    await act(() => vi.advanceTimersByTimeAsync(8_000));
     expect(check).toHaveBeenCalledOnce();
     hook.unmount();
-    await act(() => vi.advanceTimersByTimeAsync(APP_UPDATE_CHECK_INTERVAL));
+    await act(() => vi.advanceTimersByTimeAsync(86_400_000));
     expect(check).toHaveBeenCalledOnce();
   });
 

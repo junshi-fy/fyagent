@@ -235,7 +235,7 @@
     ],
     [
       "src-tauri/src/services/app_update.rs",
-      "04b500645166a4952e455706bdc6c6b3050e477ade1e58ac2e8715604a353c63"
+      "db3552be5c4cadf515347b6511a9ccd70731e609865105422222184406bf2323"
     ],
     [
       "src-tauri/src/services/codex_desktop/mod.rs",

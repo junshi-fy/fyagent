@@ -7,9 +7,10 @@ const read = (file: string) =>
   fs.readFileSync(path.join(process.cwd(), file), "utf8");
 
 describe("FyAgent application update contract", () => {
-  it("generates signed update artifacts with the supplied test public key and passive Windows installation", () => {
+  it("leaves update artifacts and .sig generation to the release pipeline when its signing private key is available, avoiding default build failures without a private key", () => {
     const config = JSON.parse(read("src-tauri/tauri.conf.json"));
-    expect(config.bundle.createUpdaterArtifacts).toBe(true);
+    // 更新产物和 .sig 由发版流水线在签名私钥可用时生成；默认构建不打开此开关，避免没有私钥时打包失败。
+    expect(config.bundle.createUpdaterArtifacts).toBe(false);
     expect(config.plugins.updater).toEqual({
       pubkey:
         "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIyNEQ0NDZGNUI4MEY5NTEKUldSUitZQmJiMFJOc3VtYllRV3Y1RHNiak95S1dYczBqeTF4YnR6MlNOUTB4cEJJSUJWRm9YS3cK",

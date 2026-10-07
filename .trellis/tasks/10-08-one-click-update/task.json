@@ -2,7 +2,7 @@
   "name": "one-click-update",
   "status": "in_progress",
   "branch": "feat/one-click-update",
-  "summary": "实现已冻结；本轮修复工作站路径和设计 token 合同；关于页和流水线后续接入；Rust 验证待分叉 CI",
+  "summary": "实现已冻结；65c157d0 复核修正默认更新产物、计时测试与维护说明；路径合同和平台扫描受沙箱 EPERM 阻塞；关于页和流水线后续接入；Rust 验证待分叉 CI",
   "implementation": "complete",
   "verification": "pending_ci",
   "verification_results": {
@@ -23,7 +23,16 @@
       "git_diff_check": "通过"
     },
     "cargo_lock": "用户已用 cargo metadata 更新，新增 tauri-plugin-updater 2.12.0 等依赖",
-    "rust": "编译、clippy、cargo test 尚未运行，待分叉 CI"
+    "rust": "编译、clippy、cargo test 尚未运行，待分叉 CI",
+    "review_fix": {
+      "source": "2026-10-08，65c157d0 Grok CLI 复核后的定向修正",
+      "unit": "7 个文件：6 通过、1 失败；32 项：31 通过、1 失败；repositoryWorkstationPathContract 的仓库扫描因 spawnSync git EPERM 失败，其他指定测试通过",
+      "supported_platform_check": "退出 1，spawnSync git EPERM；未修改扫描器或放宽检查",
+      "structure_hash": "app_update.rs 的原始字节 SHA-256 已同步；tauri.conf.json 不在结构资产登记表中",
+      "updater_source": "code_audit：插件 2.12.0 的 RemoteRelease 反序列化失败会回退，但响应 JSON 读取/解析失败会立即返回；Update.timeout 为 None",
+      "prettier_check": "退出 0，12 个支持格式的修改文件通过；Rust 无 Prettier parser，以 --ignore-unknown 跳过，仅注释变动",
+      "git_diff_check": "退出 0，0 whitespace 错误"
+    }
   },
   "deliverables": [
     "src-tauri/src/services/app_update.rs",

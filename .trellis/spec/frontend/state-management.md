@@ -59,6 +59,11 @@ the shell; download/install requires a user action. Version skips are local
 preferences. Do not add automatic downloads, migration bypasses or renderer-written
 native settings during cleanup.
 
+Runtime update checks do not depend on `bundle.createUpdaterArtifacts`.
+Keep it `false` in default builds to avoid packaging failures without a signing
+private key. The release pipeline signs the final (Authenticode-signed or notarized)
+artifacts with the signing private key to produce `.sig` files.
+
 ## 4. Validation & Error Matrix
 
 | Condition                              | Required result                                                                   |

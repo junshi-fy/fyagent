@@ -50,8 +50,11 @@ struct AppUpdateProgress {
     phase: &'static str,
 }
 
-/// Tauri tries a later endpoint only when the earlier endpoint errors. A
-/// healthy but stale mirror response does not cause a GitHub fallback.
+/// Updater 2.12.0 tries the next endpoint on network errors, non-2xx HTTP status
+/// or RemoteRelease deserialization failure. HTTP 204 returns no update;
+/// response JSON read/parse failures return immediately. A parsed manifest
+/// missing the current platform target does not fall back either. A stale
+/// mirror blocks GitHub, so releases must sync and verify the mirror first.
 fn update_endpoints(mirror: Option<&str>) -> Vec<Url> {
     let github = Url::parse(GITHUB_ENDPOINT).expect("fixed GitHub update endpoint is HTTPS");
     let mirror = mirror

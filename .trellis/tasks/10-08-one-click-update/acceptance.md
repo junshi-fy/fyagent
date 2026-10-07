@@ -2,12 +2,43 @@
 
 实现已冻结，验收尚未全部关闭。证据级别：`code_audit` + mock/unit。没有 Rust 编译、`runtime_screenshot`、`pixel_diff` 或真实签名安装证据；不声称生产更新已可用。
 
+## 65c157d0 复核修正（2026-10-08）
+
+本轮仅修正默认更新产物开关、计时合同、维护说明和相关记录。默认 `createUpdaterArtifacts: false`，更新产物与 `.sig` 由具备签名私钥的发版流水线生成；保留 updater 公钥、endpoints 和 Windows passive 配置。计时常量断言锁定 `8_000` / `86_400_000`，时间推进全部使用独立字面量。
+
+交付：[默认构建配置](../../../src-tauri/tauri.conf.json)、[配置合同](../../../tests/appUpdateContract.test.ts)、[计时合同](../../../tests/renderer/features/app-update.test.tsx)、[维护说明](../../../docs/fyagent/app-update-maintenance.md)、[三语手册](../../../docs/user-manual/zh/installation.md)（含 en/ja 同步）、[状态规范](../../spec/frontend/state-management.md)、[Rust 注释](../../../src-tauri/src/services/app_update.rs)、[结构资产哈希](../../../scripts/tasks/supported-platform-structure-assets.json)。
+
+源码核实（`code_audit`）：插件 2.12.0 的网络错误、HTTP 非 2xx、`RemoteRelease` 反序列化失败会尝试下一地址；204 直接返回没有更新，`res.json().await?` 读取/解析 JSON 失败直接返回错误；缺少当前平台条目和成功的旧清单都不会回退。维护说明已写明镜像须先同步并校验，检查请求超时 300 秒，下载的 `Update.timeout` 为 `None`，下载只占 `InstallFlight`。Rust 行为未改。
+
+根因与预防：默认构建打开更新产物但发版流水线尚无私钥，会造成打包失败；将默认关闭写入配置合同与规范，要求发版流水线取得私钥后通过临时配置生成更新产物。计时测试此前用生产常量推算期望，现用独立数字防止调度周期变化漏检。
+
+本轮验收命令均先加载已配置环境脚本 `$FYAGENT_ENV_FILE`，关闭 stdin，顺序运行：
+
+```sh
+source "$FYAGENT_ENV_FILE"
+timeout 600 pnpm test:unit tests/appUpdateContract.test.ts tests/renderer/features/app-update.test.tsx tests/renderer/features/app-update-panel.test.tsx tests/renderer/platform/appUpdate.test.ts tests/renderer/widgets/app-shell/TopBar.test.tsx tests/desktopSecurityBoundary.test.ts tests/repositoryWorkstationPathContract.test.ts </dev/null
+timeout 300 node scripts/tasks/supported-platform-check.mjs </dev/null
+timeout 300 pnpm exec prettier --check --ignore-unknown <本轮修改文件> </dev/null
+timeout 30 git diff --check </dev/null
+```
+
+| 检查                | 实际结果                                                                            |
+| ------------------- | ----------------------------------------------------------------------------------- |
+| 指定 7 文件单测     | 退出 1；6 文件通过、1 失败；31 项通过、1 失败；路径合同仓库扫描无法枚举 Git 文件    |
+| 平台扫描            | 退出 1；`spawnSync git EPERM`                                                       |
+| 独立 Git 子进程复现 | 确认 `spawnSync git EPERM`；不修改测试或扫描器绕过沙箱                              |
+| 结构资产 SHA-256    | 仅同步已登记的 app_update.rs 原始字节哈希；tauri.conf.json 未登记                   |
+| Prettier            | 退出 0；12 个支持格式的文件通过；Rust 无 parser，以 --ignore-unknown 跳过，仅改注释 |
+| git diff --check    | 退出 0；0 whitespace 错误                                                           |
+
+路径合同和规定平台扫描仍需沙箱外复跑，不声明整体验收通过。
+
 ## 文件及修改原因
 
 | 文件                                                                                                                                                                                                | 修改原因                                                                                                               |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`                                                                                                                                                      | 增加官方 `tauri-plugin-updater = "2"`；用户已用 `cargo metadata` 更新锁文件，新增 `tauri-plugin-updater 2.12.0` 等依赖 |
-| `src-tauri/tauri.conf.json`                                                                                                                                                                         | 更新产物开启、指定测试公钥、唯一 GitHub endpoint、Windows passive                                                      |
+| `src-tauri/tauri.conf.json`                                                                                                                                                                         | 默认关闭更新产物；签名私钥可用时由发版流水线生成产物和 .sig；保留测试公钥、GitHub endpoint、Windows passive            |
 | `src-tauri/permissions/app-update.toml`（新增）、`capabilities/default.json`                                                                                                                        | 精确授权两个应用命令，没有 updater 插件权限                                                                            |
 | `src-tauri/src/commands/settings.rs`、`commands/agent_catalog.rs`                                                                                                                                   | 薄命令和登记总数 398                                                                                                   |
 | `src-tauri/src/lib.rs`                                                                                                                                                                              | 桌面插件非致命注册、命令注册、更新生命周期释放、保留门禁直到共享清理实际重启                                           |
@@ -54,7 +85,7 @@
 
 `option_env!("FYAGENT_UPDATE_MIRROR_ENDPOINT")` 读取构建时值。空/非法/非 HTTPS 忽略；合法值生成 `[镜像, GitHub]`，去重，再传 updater_builder.endpoints。未指定就是配置中的唯一 GitHub。没有预设任何镜像域名。
 
-只有前一地址报错才尝试后一地址；成功但旧的镜像清单不会自动回退。流水线本次未改；正式上线须替换测试公钥并离线备份私钥、秘密注入 TAURI_SIGNING_PRIVATE_KEY、产生 .sig/latest.json、镜像同步失败判定为发版失败。Windows Authenticode 在 Tauri 更新签名之前完成，否则改写产物会使 .sig 失效。
+插件 2.12.0 在网络错误、HTTP 非 2xx 或 RemoteRelease 反序列化失败时尝试下一地址；204 直接返回没有更新，响应 JSON 读取/解析失败直接返回错误；可解析清单缺少当前平台条目时不回退。成功但旧的镜像清单会挡住 GitHub，发版必须先同步镜像并校验，失败视为发版失败。默认 createUpdaterArtifacts 为 false；运行时检查不依赖该开关。流水线本次未改；正式上线须替换测试公钥并离线备份私钥，秘密注入 TAURI_SIGNING_PRIVATE_KEY 后，在最终签名（Authenticode/公证）后的产物上用 tauri signer sign 生成 .sig，再生成 latest.json，不在 tauri build 时打开 createUpdaterArtifacts。Windows Authenticode 在 Tauri 更新签名之前完成，否则改写产物会使 .sig 失效。
 
 ## 新增 Rust 测试（未执行）
 
@@ -69,7 +100,7 @@
 - `app_update_reservation_blocks_new_jobs_and_releases_on_failure`
 - `app_update_reservation_admits_terminal_jobs_without_changing_their_result`
 
-## 最新验证记录（2026-10-08）
+## 路径与设计 token 修复验证（历史记录，2026-10-08）
 
 以下沙箱外结果由用户实际运行并提供；完整单测结果属于本轮修复前的运行，不代表修复后全部通过。
 
@@ -133,9 +164,9 @@ source "$FYAGENT_ENV_FILE" && timeout 900 pnpm test:unit tests/appUpdateContract
 
 失败分布：releaseWorkflow 6、remainingPlatformSurface 4、dependencyGraph 2、rootGovernance 2、desktopAcceptanceContract 1；rendererConsolidation 在导入时 spawnSync git EPERM。desktopAcceptance 的空 stderr 是子进程错误的次生断言失败。独立对 git/bash/node 的 spawnSync 均复现 EPERM，未修改断言或扫描器子进程逻辑。完整输出保存为临时日志 `fyagent-update-final-unit.log`。
 
-替代平台扫描未放宽 production scanner：实际文件和 stage 由 shell Git 只读捕获，新文件只登记到临时 index 副本用于 mode 校验，不修改真实 index；原 scanner 全部源码、cfg、指纹、静态与栅格规则继续执行。该历史证据不能替代规定的 CLI 成功；用户后续沙箱外运行的通过结果见「最新验证记录」。
+替代平台扫描未放宽 production scanner：实际文件和 stage 由 shell Git 只读捕获，新文件只登记到临时 index 副本用于 mode 校验，不修改真实 index；原 scanner 全部源码、cfg、指纹、静态与栅格规则继续执行。该历史证据不能替代规定的 CLI 成功；用户后续沙箱外运行的通过结果见「路径与设计 token 修复验证」。
 
-开发过程中已修复的失败：配置/权限初始合同 2 项失败作为先验复现；mock Promise 类型错误 1 个和 lint unused 参数 3 个已修复；核心平台扫描暴露的两个 not(windows) 隐式目标边界已改成显式 Windows/macOS 和精确零副作用拒绝 stub。当前验证状态以「最新验证记录」为准。
+开发过程中已修复的失败：配置/权限初始合同 2 项失败作为先验复现；mock Promise 类型错误 1 个和 lint unused 参数 3 个已修复；核心平台扫描暴露的两个 not(windows) 隐式目标边界已改成显式 Windows/macOS 和精确零副作用拒绝 stub。当前验证状态以「65c157d0 复核修正」为准。
 
 Cargo.lock 已由用户更新；Rust 类型/借用/Send、Windows/macOS cfg、官方插件编译集成、10 个 Rust 测试和 clippy -D warnings 仍待分叉 CI 验证。
 
