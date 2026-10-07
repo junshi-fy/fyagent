@@ -2636,7 +2636,7 @@ mod tests {
             helper_image: None,
             controls: Some(ParentControlEvents {
                 admission: manual_event(),
-                cancel: manual_event(),
+                cancel: Arc::new(manual_event()),
             }),
             server: Some(server),
             process: None,
