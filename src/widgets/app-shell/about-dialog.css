@@ -34,6 +34,81 @@
   border-radius: var(--fy-radius-compact);
 }
 
+.fy-about-star-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--fy-surface-soft, rgba(240, 247, 252, 0.42));
+  border: 1px solid var(--fy-border, rgba(73, 107, 133, 0.26));
+  border-radius: var(--fy-radius-control, 8px);
+}
+
+.fy-about-star-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.fy-about-star-icon {
+  flex-shrink: 0;
+  color: #f59e0b;
+}
+
+@keyframes fy-star-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fy-about-star-icon {
+    animation: fy-star-spin 6s linear infinite;
+  }
+}
+
+.fy-about-star-text {
+  margin: 0;
+  font-size: var(--fy-font-control, 13px);
+  color: var(--fy-text, #183247);
+  line-height: 1.4;
+}
+
+.fy-about-star-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.fy-about-star-dismiss {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fy-text-secondary, #344f64);
+  border-radius: var(--fy-radius-circle, 9999px);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fy-about-star-dismiss:hover {
+  border-color: var(--fy-border, rgba(73, 107, 133, 0.26));
+  background: var(--fy-surface-hover, rgba(182, 214, 236, 0.46));
+  color: var(--fy-text, #183247);
+}
+
 .fy-about-details > p {
   color: var(--text-muted);
   line-height: 1.6;

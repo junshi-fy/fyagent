@@ -1,25 +1,51 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/csr/GithubLogo";
+import { StarIcon } from "@phosphor-icons/react/dist/csr/Star";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
+import { detectNativePlatform } from "../../shared/platform";
 import { ExternalLinkButton } from "../../shared/features/controls/ExternalLinkButton";
 import { useAppVersion } from "../../shared/features/useAppVersion";
-import { Button } from "../../shared/ui/Button";
+import { Button, IconButton } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
 import type { DialogOriginRef } from "../../shared/ui/dialogOrigin";
+import {
+  ABOUT_COPY,
+  PROJECT_URL,
+  buildFeedbackUrl,
+  dismissStarPrompt,
+  readStarPromptDismissed,
+  resolveAboutLocale,
+  type AboutLocale,
+} from "./aboutDialogState";
 import "./about-dialog.css";
-
-const projectUrl = "https://github.com/fy-agent/fyagent";
 
 export default function AboutDialog({
   open,
   onOpenChange,
   originRef,
+  locale,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   originRef: DialogOriginRef;
+  locale?: AboutLocale;
 }) {
   const version = useAppVersion(open);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [starDismissed, setStarDismissed] = useState(readStarPromptDismissed);
+  const activeLocale = resolveAboutLocale(locale);
+  const copy = ABOUT_COPY[activeLocale];
+  const platform = detectNativePlatform();
+  const feedbackUrl = buildFeedbackUrl({
+    version: version.data,
+    platform,
+  });
+
+  const handleDismissStar = () => {
+    setStarDismissed(true);
+    dismissStarPrompt();
+  };
 
   return (
     <Dialog
@@ -27,53 +53,85 @@ export default function AboutDialog({
       onOpenChange={onOpenChange}
       originRef={originRef}
       initialFocusRef={closeRef}
-      title="关于 FyAgent"
-      description="在一个地方安装 AI 软件、连接模型，并管理项目所需的配置。"
+      title={copy.title}
+      description={copy.description}
       actions={
         <Button ref={closeRef} onClick={() => onOpenChange(false)}>
-          关闭
+          {copy.close}
         </Button>
       }
     >
       <div className="fy-about-content">
+        {!starDismissed && (
+          <div className="fy-about-star-banner">
+            <div className="fy-about-star-banner-content">
+              <StarIcon
+                size={18}
+                weight="fill"
+                aria-hidden="true"
+                className="fy-about-star-icon"
+              />
+              <p className="fy-about-star-text">{copy.starPrompt}</p>
+            </div>
+            <div className="fy-about-star-actions">
+              <ExternalLinkButton url={PROJECT_URL}>
+                <GithubLogoIcon size={16} aria-hidden="true" />
+                <span>{copy.starButton}</span>
+              </ExternalLinkButton>
+              <IconButton
+                className="fy-about-star-dismiss"
+                onClick={handleDismissStar}
+                aria-label={copy.dismissStarPrompt}
+                title={copy.dismissStarPrompt}
+              >
+                <XIcon size={16} aria-hidden="true" />
+              </IconButton>
+            </div>
+          </div>
+        )}
         <div className="fy-about-version" aria-live="polite">
-          <span>当前版本</span>
+          <span>{copy.currentVersion}</span>
           {version.data ? (
             <strong>{version.data}</strong>
           ) : version.isError ? (
             <>
-              <span>版本信息暂不可用</span>
+              <span>{copy.versionUnavailable}</span>
               <Button
                 onClick={() => void version.refetch()}
                 disabled={version.isFetching}
               >
-                {version.isFetching ? "正在读取…" : "重新读取"}
+                {version.isFetching ? copy.loading : copy.reload}
               </Button>
             </>
           ) : (
-            <span>正在读取…</span>
+            <span>{copy.loading}</span>
           )}
         </div>
         <div className="fy-about-links">
-          <ExternalLinkButton url={`${projectUrl}/releases`}>
-            查看更新
+          <ExternalLinkButton url={`${PROJECT_URL}/releases`}>
+            {copy.checkUpdates}
           </ExternalLinkButton>
-          <ExternalLinkButton url={`${projectUrl}/issues`}>
-            帮助与反馈
+          <ExternalLinkButton url={`${PROJECT_URL}/issues`}>
+            {copy.helpAndFeedback}
+          </ExternalLinkButton>
+          <ExternalLinkButton url={feedbackUrl}>
+            {copy.feedback}
           </ExternalLinkButton>
         </div>
         <details className="fy-about-details">
-          <summary>发布与许可</summary>
-          <p>更新页面提供各版本的变更说明、安装包和发布信息。</p>
+          <summary>{copy.releaseAndLicense}</summary>
+          <p>{copy.releaseDescription}</p>
           <div className="fy-about-links">
-            <ExternalLinkButton url={projectUrl}>项目主页</ExternalLinkButton>
-            <ExternalLinkButton url={`${projectUrl}/blob/main/LICENSING.md`}>
-              软件许可
+            <ExternalLinkButton url={PROJECT_URL}>
+              {copy.projectHome}
+            </ExternalLinkButton>
+            <ExternalLinkButton url={`${PROJECT_URL}/blob/main/LICENSING.md`}>
+              {copy.softwareLicense}
             </ExternalLinkButton>
             <ExternalLinkButton
-              url={`${projectUrl}/blob/main/THIRD_PARTY_NOTICES.md`}
+              url={`${PROJECT_URL}/blob/main/THIRD_PARTY_NOTICES.md`}
             >
-              第三方声明
+              {copy.thirdPartyNotices}
             </ExternalLinkButton>
           </div>
         </details>
