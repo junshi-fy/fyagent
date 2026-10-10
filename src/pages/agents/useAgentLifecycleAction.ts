@@ -145,7 +145,12 @@ export function deriveAgentLifecyclePrimaryAction(
 ): AgentLifecyclePrimaryAction | null {
   if (!readiness) return null;
   const allowed = new Set(readiness.allowedActions);
-  if (readiness.installState === "not_installed" && allowed.has("install")) {
+  if (
+    allowed.has("install") &&
+    (readiness.installState === "not_installed" ||
+      (readiness.installState === "unknown" &&
+        readiness.sourceKind === "cli_tooling"))
+  ) {
     return "install";
   }
   if (canOfferDirectoryUpdate(agentId, readiness)) {
@@ -290,6 +295,15 @@ export function lifecycleSuccessCopy(vendorHandoff: boolean): string {
   return vendorHandoff
     ? AGENT_LIFECYCLE_VENDOR_HANDOFF_COPY
     : AGENT_LIFECYCLE_SUCCEEDED_COPY;
+}
+
+function isReadinessInstalled(
+  readiness: AgentInstallReadiness | null,
+): boolean {
+  return (
+    readiness?.installState === "installed" ||
+    readiness?.installState === "installed_not_runnable"
+  );
 }
 
 export function agentLifecycleFailureCopy(
@@ -612,7 +626,10 @@ export function useAgentLifecycleAction({
 
       setReasonCode(outcomeReason);
       if (outcome === "succeeded" && readbackOk) {
-        const successCopy = lifecycleSuccessCopy(vendorHandoffRef.current);
+        const successCopy = lifecycleSuccessCopy(
+          vendorHandoffRef.current &&
+            !isReadinessInstalled(readinessRef.current),
+        );
         setSuccess(successCopy);
         setError(null);
       } else if (outcome === "timeout") {
@@ -786,7 +803,11 @@ export function useAgentLifecycleAction({
     progressLabel: transferView.downloadLine,
     error,
     reasonCode,
-    success,
+    success:
+      success === AGENT_LIFECYCLE_VENDOR_HANDOFF_COPY &&
+      isReadinessInstalled(readiness)
+        ? AGENT_LIFECYCLE_SUCCEEDED_COPY
+        : success,
     activeSurface,
     canCancel: busy && jobId !== null && cancellable,
     canRetry:

@@ -63,7 +63,7 @@
     ],
     [
       "src-tauri/src/agent_install/inventory.rs",
-      "7bd020a78fa87da3c779f57be30b0a45d8aa367eb68891941f434f4a4b399a6f"
+      "8670bda5e47fa4d9ebd1fd439935c9a2544b829bc3510a4b0e1178ae09058b1f"
     ],
     [
       "src-tauri/src/agent_install/macos.rs",
@@ -171,7 +171,7 @@
     ],
     [
       "src-tauri/src/gemini_config.rs",
-      "33c1ea0d87b4ea9d13a222c4cb76851163f68288be7978d3437b1ced336195ba"
+      "c4e2ae5943f57025f522b66638bb74bea891f47e2d99338dbcb9ed1efdf869bd"
     ],
     [
       "src-tauri/src/hermes_config.rs",
