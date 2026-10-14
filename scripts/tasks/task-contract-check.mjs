@@ -88,13 +88,82 @@ export const REQUIRED_TASKS = Object.freeze([
   "version:set",
 ]);
 
+export const REQUIRED_PARAMETERIZED_TASKS = Object.freeze([
+  "assets:icons",
+  "check:contracts:prearchive",
+  "check:prearchive",
+  "clean:all",
+  "clean:artifacts",
+  "clean:frontend",
+  "clean:python",
+  "clean:rust",
+  "deps:update:frontend",
+  "deps:update:rust",
+  "env:check",
+  "format:files",
+  "python:add:dev",
+  "python:lock",
+  "python:remove:dev",
+  "python:run",
+  "python:tool",
+  "python:update",
+  "python:with",
+  "rust:test",
+  "system:check",
+  "system:check:windows-msvc-cross",
+  "supported-platform:check",
+  "tasks:docs:generate",
+  "test:desktop:visual:update",
+  "test:unit",
+  "test:unit:watch",
+  "toolchain:lock",
+  "toolchain:update:node",
+  "toolchain:update:pnpm",
+  "toolchain:update:rust",
+  "toolchain:update:uv",
+  "upstream:audit",
+  "upstream:fetch",
+  "upstream:merge:prepare",
+  "version:bump",
+  "version:check",
+  "version:set",
+]);
+
+export function usageDeclaresParameters(usage) {
+  return (
+    typeof usage === "string" &&
+    /^[\t ]*(?:arg|flag)[\t ]+"[^"\r\n]+"/mu.test(usage)
+  );
+}
+
+export function parameterizedTasksFrom(tasks) {
+  return Object.entries(tasks)
+    .filter(([, task]) => usageDeclaresParameters(task.usage))
+    .map(([name]) => name);
+}
+
 export const PARAMETERIZED_TASKS = Object.freeze(
-  Object.entries(loadTaskDefinitions())
-    .filter(
-      ([, task]) => typeof task.usage === "string" && task.usage.trim() !== "",
-    )
-    .map(([name]) => name),
+  parameterizedTasksFrom(loadTaskDefinitions()),
 );
+
+export function assertTaskUsageContracts(tasks) {
+  for (const name of REQUIRED_PARAMETERIZED_TASKS) {
+    if (!tasks[name] || !usageDeclaresParameters(tasks[name].usage)) {
+      throw new Error(
+        `Parameterized task ${name} must declare non-empty usage`,
+      );
+    }
+  }
+  for (const [name, task] of Object.entries(tasks)) {
+    if (
+      typeof task.usage === "string" &&
+      task.usage.trim() !== "" &&
+      !usageDeclaresParameters(task.usage)
+    ) {
+      throw new Error(`Task ${name} usage must declare an arg or flag`);
+    }
+  }
+}
 
 export const RAW_TASKS = Object.freeze([
   "dev",
@@ -210,6 +279,7 @@ function executableFiles() {
 
 export function validateTaskContract() {
   const tasks = loadTaskDefinitions();
+  assertTaskUsageContracts(tasks);
   const names = Object.keys(tasks);
   for (const relative of RETIRED_PROJECT_TOOLING) {
     if (fs.existsSync(path.join(ROOT, relative))) {
