@@ -6,6 +6,7 @@ import react from "@vitejs/plugin-react";
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const hostIntegrationFiles = [
   "tests/developmentEnvironment.test.ts",
+  "tests/miseTaskContract.test.ts",
   "tests/systemCheck.test.ts",
   "tests/taskDocs.test.ts",
   "tests/windowsMsvcCross.test.ts",
